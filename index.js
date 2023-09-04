@@ -37,7 +37,6 @@ const connectDB = async () => {
 
 app.use(cors())
 .use(express.json())
-// .use(corsAllow)
 .use(express.urlencoded({ extended: true, limit: "200mb" }))
 .use('/', router)
 .use('/users', users)
