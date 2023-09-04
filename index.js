@@ -10,6 +10,7 @@ import transferReceipt from "./router/transferReceipts.js";
 import purchaseReceipt from "./router/purchaseReceipts.js";
 import recoverPassword from "./router/recoverPassword.js";
 import cors from 'cors';
+import {corsAllow} from "./middleware/corsAllow.js";
 
 mongoose.set('strictQuery', true);
 
@@ -36,7 +37,8 @@ const connectDB = async () => {
 
 app.use(express.json())
 .use(cors())
-.use(express.urlencoded({ extended: false, limit: "5mb" }))
+.use(corsAllow)
+.use(express.urlencoded({ extended: true, limit: "200mb" }))
 .use('/', router)
 .use('/users', users)
 .use('/login', login)
