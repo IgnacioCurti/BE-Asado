@@ -69,7 +69,9 @@ router.put("/editUser/:id", auth , async (req, res) => {
             user.profilePicture = imageId
         }
         user = await user.save()
-
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+        res.header('Access-Control-Allow-Methods', 'PUT');
         res.send(user);
     } catch(e){
         res.status(500).send(e.message)
