@@ -47,6 +47,9 @@ app.use(express.json())
 .use('/transferReceipts', transferReceipt)
 .use('/purchaseReceipts', purchaseReceipt)
 .use('/password', recoverPassword)
+.options("*", (req, res) => {
+    res.status(200).send("Preflight request allowed");
+  });
 
 connectDB().then(() => {
     app.listen(PORT, () => {
