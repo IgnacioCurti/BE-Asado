@@ -4,7 +4,6 @@ import {auth} from "../middleware/auth.js"
 import bcrypt from "bcrypt";
 import {multerUpload} from "../middleware/multerUpload.js";
 import {saveImage} from "../services/images.service.js";
-import cors from "cors";
 
 
 const router = Router();
@@ -53,7 +52,6 @@ router.post("/register", [multerUpload.single("file")], async (req, res) => {
     }
 });
 
-router.options("/editUser/:id")
 router.put("/editUser/:id", [auth, cors], async (req, res) => {
     try{
 

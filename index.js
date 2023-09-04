@@ -36,8 +36,8 @@ const connectDB = async () => {
 
 
 app.use(express.json())
-.use(cors())
-.use(corsAllow)
+.options('*', cors())
+// .use(corsAllow)
 .use(express.urlencoded({ extended: true, limit: "200mb" }))
 .use('/', router)
 .use('/users', users)
@@ -47,9 +47,6 @@ app.use(express.json())
 .use('/transferReceipts', transferReceipt)
 .use('/purchaseReceipts', purchaseReceipt)
 .use('/password', recoverPassword)
-.options("*", (req, res) => {
-    res.status(200).send("Preflight request allowed");
-  });
 
 connectDB().then(() => {
     app.listen(PORT, () => {
