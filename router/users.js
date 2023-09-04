@@ -52,7 +52,7 @@ router.post("/register", [multerUpload.single("file")], async (req, res) => {
     }
 });
 
-router.put("/editUser/:id", [auth, cors], async (req, res) => {
+router.put("/editUser/:id", auth, async (req, res) => {
     try{
 
         let user = await User.findById(req.params.id);
