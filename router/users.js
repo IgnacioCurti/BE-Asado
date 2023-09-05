@@ -56,7 +56,7 @@ router.put("/editUser/:id", auth, async (req, res) => {
             return res.status(404).send("The user with the given ID was not found.");
         }
 
-        user.name = req.body.name
+        user.name = req.body.name ? req.body.name : null 
         user.profilePicture = req.body.profilePicture
         user.specialDiet = req.body.specialDiet
         user.alias = req.body.alias
