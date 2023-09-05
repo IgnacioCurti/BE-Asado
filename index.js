@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import express, { json } from "express";
+import express from "express";
 import router from "./router/index.js";
 import login from "./router/login.js";
 import users from "./router/users.js";
@@ -11,6 +11,7 @@ import purchaseReceipt from "./router/purchaseReceipts.js";
 import recoverPassword from "./router/recoverPassword.js";
 import cors from 'cors';
 
+
 mongoose.set('strictQuery', true);
 
 dotenv.config();
@@ -18,7 +19,7 @@ dotenv.config();
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3600;
 
 const connectDB = async () => {
     try {
@@ -33,10 +34,12 @@ const connectDB = async () => {
     }
 }
 
-
-app.use(express.json())
-.use(cors())
-.use(express.urlencoded({ extended: false, limit: "5mb" }))
+app.use(cors({
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: '*',
+}))
+.use(express.json())
+.use(express.urlencoded({ extended: true, limit: "200mb" }))
 .use('/', router)
 .use('/users', users)
 .use('/login', login)

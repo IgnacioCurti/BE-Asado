@@ -4,7 +4,9 @@ import mongoose from "mongoose";
 const purchaseReceiptSchema = new mongoose.Schema({
 
     image: {
-        type: String
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Image',
+        default: null
     },
 
     description: {

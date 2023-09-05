@@ -2,6 +2,8 @@ import {Router} from "express";
 import {User} from "../models/user.js";
 import {auth} from "../middleware/auth.js"
 import bcrypt from "bcrypt";
+import {multerUpload} from "../middleware/multerUpload.js";
+import {saveImage} from "../services/images.service.js";
 
 
 const router = Router();
@@ -32,7 +34,7 @@ router.get("/getUserById/:id", auth, async (req, res) => {
 });
 
 
-router.post("/register", async (req, res) => {
+router.post("/register", [multerUpload.single("file")], async (req, res) => {
     try{
         const existingUser = await User.findOne({email: req.body.email});
         if (existingUser) {
@@ -40,7 +42,9 @@ router.post("/register", async (req, res) => {
         }
         let user = new User(req.body);
         const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(user.password, salt);
+        user.password = await bcrypt.hash(req.body.password, salt);
+        const imageId = await saveImage(req.file)
+        user.profilePicture = imageId
         user = await user.save();
         res.status(201).send(user);
     } catch(e) {
@@ -48,20 +52,24 @@ router.post("/register", async (req, res) => {
     }
 });
 
-
-router.put("/editUser/:id", auth, async (req, res) => {
+router.put("/editUser/:id", auth , async (req, res) => {
     try{
+
         let user = await User.findById(req.params.id);
         if (!user){
             return res.status(404).send("The user with the given ID was not found.");
         }
+
 
         user.name = req.body.name ? req.body.name : null 
         user.profilePicture = req.body.profilePicture
         user.specialDiet = req.body.specialDiet
         user.alias = req.body.alias
         user.cbu = req.body.cbu
-
+        // if (req.body.profilePictureChange){
+        //     const imageId = await saveImage(req.file)
+        //     user.profilePicture = imageId
+        // }
         user = await user.save()
 
         res.send(user);
@@ -69,6 +77,7 @@ router.put("/editUser/:id", auth, async (req, res) => {
         res.status(500).send(e.message)
     }
 });
+
 
 
 router.delete('/deleteUser/:id', auth, async (req, res) => {

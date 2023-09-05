@@ -2,8 +2,8 @@ import {Router} from "express";
 import {TransferReceipt} from "../models/transferReceipt.js";
 import {Event} from "../models/event.js";
 import {auth} from "../middleware/auth.js"
-import { shoppingDesignee } from "../middleware/shoppingDesignee.js";
-import { multerUpload } from "../middleware/multerUpload.js";
+import {shoppingDesignee} from "../middleware/shoppingDesignee.js";
+import {multerUpload} from "../middleware/multerUpload.js";
 import {saveImage} from "../services/images.service.js";
 
 
