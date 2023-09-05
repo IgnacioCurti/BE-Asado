@@ -52,14 +52,14 @@ router.post("/register", [multerUpload.single("file")], async (req, res) => {
     }
 });
 
-router.put("/editUser/:id", auth , async (req, res) => {
+router.put("/editUser/:id", [auth, multerUpload.single('file')] , async (req, res) => {
     try{
 
         let user = await User.findById(req.params.id);
         if (!user){
             return res.status(404).send("The user with the given ID was not found.");
         }
-        console.log(req.body.specialDiet)
+
         user.name = req.body.name
         user.specialDiet = req.body.specialDiet
         user.alias = req.body.alias
@@ -69,9 +69,7 @@ router.put("/editUser/:id", auth , async (req, res) => {
             user.profilePicture = imageId
         }
         user = await user.save()
-        res.header("Access-Control-Allow-Origin", "*");
-        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-        res.header('Access-Control-Allow-Methods', 'PUT');
+
         res.send(user);
     } catch(e){
         res.status(500).send(e.message)

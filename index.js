@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import express, { json } from "express";
+import express from "express";
 import router from "./router/index.js";
 import login from "./router/login.js";
 import users from "./router/users.js";
@@ -19,7 +19,7 @@ dotenv.config();
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3600;
 
 const connectDB = async () => {
     try {

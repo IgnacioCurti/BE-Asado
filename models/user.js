@@ -43,7 +43,7 @@ const userSchema = new mongoose.Schema({
 
     specialDiet: {
         type: [String],
-        required: true,
+        default: [],
         validate: {
             validator: function(v){
                 const valid_diets = ["celiac", "hypertensive", "vegan", "vegetarian"]
