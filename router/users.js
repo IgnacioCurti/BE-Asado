@@ -52,7 +52,7 @@ router.post("/register", [multerUpload.single("file")], async (req, res) => {
     }
 });
 
-router.put("/editUser/:id", [auth, multerUpload.single('file')] , async (req, res) => {
+router.put("/editUser/:id", auth , async (req, res) => {
     try{
 
         let user = await User.findById(req.params.id);
@@ -64,10 +64,10 @@ router.put("/editUser/:id", [auth, multerUpload.single('file')] , async (req, re
         user.specialDiet = req.body.specialDiet
         user.alias = req.body.alias
         user.cbu = req.body.cbu
-        if (req.body.profilePictureChange){
-            const imageId = await saveImage(req.file)
-            user.profilePicture = imageId
-        }
+        // if (req.body.profilePictureChange){
+        //     const imageId = await saveImage(req.file)
+        //     user.profilePicture = imageId
+        // }
         user = await user.save()
 
         res.send(user);
