@@ -1,7 +1,5 @@
 import {Router} from "express";
 import {User} from "../models/user.js";
-import {TransferReceipt} from "../models/transferReceipt.js";
-import {Event} from "../models/event.js";
 import {auth} from "../middleware/auth.js"
 import {sameUser} from "../middleware/sameUser.js"
 import bcrypt from "bcrypt";

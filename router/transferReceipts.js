@@ -40,7 +40,6 @@ router.post("/createTransferReceipt/:event", [auth, multerUpload.single('file')]
         const imageId = await saveImage(req.file);
         let transferReceipt = new TransferReceipt(req.body);
         transferReceipt.image = imageId;
-        transferReceipt.event = req.params.event;
         transferReceipt = await transferReceipt.save();
         const event = await Event.findById(req.params.event);
         event.transferReceipts.push(transferReceipt);
