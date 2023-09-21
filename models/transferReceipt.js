@@ -40,7 +40,6 @@ const transferReceiptSchema = new mongoose.Schema({
         ref: 'Event',
         required: true
     }
-
 });
 
 

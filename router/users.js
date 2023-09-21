@@ -50,7 +50,7 @@ router.get("/isDebtor/:id", [auth, sameUser], async (req, res) => {
 })
 
 
-router.post("/register", /*multerUpload.single('file'),*/ async (req, res) => {
+router.post("/register", /*multerUpload.single('file'), */ async (req, res) => {
     try{
         
         const existingUser = await User.findOne({email: req.body.email});
