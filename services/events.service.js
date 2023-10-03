@@ -14,6 +14,7 @@ async function getPublicEvents(limit){
             {
                 _id: event.id,
                 datetime: event.datetime,
+                title: event.title,
                 description: event.description,
                 state: event.state,
                 chef: event.chef ? event.chef.name : null,
