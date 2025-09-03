@@ -23,7 +23,7 @@ export function auth(req: IRequestWithUser, res: Response, next: NextFunction) {
       .json({ message: "Access denied. No token provided." });
 
   try {
-    const decoded = jwt.verify(token, jwtPrivateKey) as IUserPayload;
+    const decoded = jwt.verify(token.split(" ")[1], jwtPrivateKey) as IUserPayload;
     req.user = decoded;
     next();
   } catch (error: any) {

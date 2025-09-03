@@ -22,7 +22,7 @@ export async function login(req: Request, res: Response): Promise<Response> {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Invalid email or password" });
-    const token: string = existingUser.generateAuthToken();
+    const token: string = `Bearer ${existingUser.generateAuthToken()}`;
     return res.status(STATUS_CODES.OK).json({
       id: existingUser.id,
       name: existingUser.name,
