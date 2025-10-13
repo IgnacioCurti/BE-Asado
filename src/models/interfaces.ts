@@ -1,8 +1,10 @@
 import mongoose, { Document } from "mongoose";
 import { Request } from "express";
 
+export type ObjectId = mongoose.Types.ObjectId;
+
 export interface IUser extends Document {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   name: string;
   lastName?: string;
   email: string;
@@ -18,7 +20,7 @@ export interface IUser extends Document {
     penalizationStart: boolean;
     penalizationOneWeek: boolean;
   };
-  profilePicture?: mongoose.Types.ObjectId | null;
+  profilePicture?: ObjectId | null;
   generateAuthToken(): string;
   isValidPassword(password: string): Promise<boolean>;
 }
@@ -29,7 +31,7 @@ export interface ISafeUser
 export interface IUserName extends Pick<IUser, "_id" | "name" | "lastName"> {}
 
 export interface IUserBalance {
-  userId: mongoose.Types.ObjectId;
+  userId: ObjectId;
   userName: string;
   userLastName: string;
   userCbu: string;
@@ -38,11 +40,11 @@ export interface IUserBalance {
 }
 
 export interface ITransferInfo {
-  userId: mongoose.Types.ObjectId;
+  userId: ObjectId;
   userName: string;
   amount: number;
   receiver: {
-    receiverId: mongoose.Types.ObjectId;
+    receiverId: ObjectId;
     receiverName: string;
     receiverLastName: string;
     receiverCbu: string;
@@ -52,30 +54,30 @@ export interface ITransferInfo {
 
 export interface IReceiptInfo {
   hasReceiptApproved: boolean;
-  transferReceipt: mongoose.Types.ObjectId;
+  transferReceipt: ObjectId;
 }
 
 export interface IMemberWhoHasUploaded {
-  userId: mongoose.Types.ObjectId;
+  userId: ObjectId;
   userName: string;
   userLastName: string;
   specialDiet: string[];
-  transferReceipt: mongoose.Types.ObjectId | null;
+  transferReceipt: ObjectId | null;
   hasReceiptApproved: boolean | null;
   hasUploaded: boolean;
 }
 
 export interface ITransferReceipt extends Document {
-  _id: mongoose.Types.ObjectId;
-  image?: mongoose.Types.ObjectId | null;
+  _id: ObjectId;
+  image?: ObjectId | null;
   description?: string;
   amount: number;
   hasPaid: boolean;
   paymentMethod?: string | null;
-  user: mongoose.Types.ObjectId;
-  event: mongoose.Types.ObjectId;
+  user: ObjectId;
+  event: ObjectId;
   datetime: Date;
-  receiver: mongoose.Types.ObjectId | null;
+  receiver: ObjectId | null;
 }
 
 export interface ITransferReceiptWithUser
@@ -86,30 +88,30 @@ export interface ITransferReceiptWithUser
 export interface IHasUploadedInfo {
   hasUploaded: boolean;
   hasReceiptApproved: boolean;
-  transferReceipt: mongoose.Types.ObjectId | null;
+  transferReceipt: ObjectId | null;
 }
 
 export interface IReminder extends Document {
-  _id: mongoose.Types.ObjectId;
-  event: mongoose.Types.ObjectId;
+  _id: ObjectId;
+  event: ObjectId;
   datetime: Date;
   type: string;
 }
 
 export interface IRating extends Document {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   score: number;
-  user: mongoose.Types.ObjectId;
+  user: ObjectId;
 }
 
 export interface IPurchaseReceipt extends Document {
-  _id: mongoose.Types.ObjectId;
-  image?: mongoose.Types.ObjectId | null;
+  _id: ObjectId;
+  image?: ObjectId | null;
   description?: string;
   amount: number;
-  event: mongoose.Types.ObjectId;
-  shoppingDesignee: mongoose.Types.ObjectId;
-  participants: mongoose.Types.ObjectId[];
+  event: ObjectId;
+  shoppingDesignee: ObjectId;
+  participants: ObjectId[];
 }
 
 export interface IPurchaseReceiptWithUsers
@@ -119,27 +121,27 @@ export interface IPurchaseReceiptWithUsers
 }
 
 export interface IImage extends Document {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   name: string;
   mimetype?: string;
   image: Buffer;
 }
 
 export interface IEvent extends Document {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   description?: string;
   title: string;
   datetime: Date;
   memberLimit: number;
   state: string;
-  members: mongoose.Types.ObjectId[];
-  chef?: mongoose.Types.ObjectId | null;
-  organizer: mongoose.Types.ObjectId;
-  shoppingDesignee?: mongoose.Types.ObjectId[] | null;
-  transferReceipts: mongoose.Types.ObjectId[];
-  purchaseReceipts: mongoose.Types.ObjectId[];
-  ratings: mongoose.Types.ObjectId[];
-  options: mongoose.Types.ObjectId[];
+  members: ObjectId[];
+  chef?: ObjectId | null;
+  organizer: ObjectId;
+  shoppingDesignee?: ObjectId[] | null;
+  transferReceipts: ObjectId[];
+  purchaseReceipts: ObjectId[];
+  ratings: ObjectId[];
+  options: ObjectId[];
   isPrivate?: boolean;
   penalization?: number | null;
   penalizationStartDate?: Date | null;
@@ -176,7 +178,7 @@ export interface IPublicEventPreReduction
 }
 
 export interface IPublicEvent {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   description?: string;
   title: string;
   datetime: Date;
@@ -286,9 +288,9 @@ export interface IRequestWithUser extends Request {
 }
 
 export interface IOption extends Document {
-  _id: mongoose.Types.ObjectId;
+  _id: ObjectId;
   title: string;
-  participants: mongoose.Types.ObjectId[];
+  participants: ObjectId[];
 }
 
 export interface IOptionPopulated extends Omit<IOption, "participants"> {

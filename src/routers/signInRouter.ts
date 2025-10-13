@@ -1,7 +1,7 @@
-import express from "express";
-import { login } from "../controllers/login.js";
+import { Router } from "express";
+import { login } from "../controllers/login";
 
-const signInRouter: express.Router = express.Router();
+const signInRouter = Router();
 
 signInRouter.post("/", login);
 

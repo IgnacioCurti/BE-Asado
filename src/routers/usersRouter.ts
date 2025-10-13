@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   getUsers,
   getUserById,
@@ -8,14 +8,10 @@ import {
   editUser,
   editProfilePicture,
   deleteUser,
-} from "../controllers/users.js";
-import {
-  auth,
-  multerUploadImages,
-  sameUser,
-} from "../middleware/middleware.js";
+} from "../controllers/users";
+import { auth, multerUploadImages, sameUser } from "../middleware/middleware";
 
-const usersRouter: express.Router = express.Router();
+const usersRouter = Router();
 
 usersRouter.get("/getUsers", auth, getUsers);
 

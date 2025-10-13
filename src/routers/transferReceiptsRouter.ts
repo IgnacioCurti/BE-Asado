@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   getTransferReceiptsByEvent,
   getTransferReceiptsById,
@@ -7,14 +7,10 @@ import {
   approvePaymentWithoutReceipt,
   approveTransferReceipt,
   deleteTransferReceipt,
-} from "../controllers/transferReceipts.js";
-import {
-  auth,
-  shoppingDesignee,
-  multerUpload,
-} from "../middleware/middleware.js";
+} from "../controllers/transferReceipts";
+import { auth, shoppingDesignee, multerUpload } from "../middleware/middleware";
 
-const transferReceiptRouter: express.Router = express.Router();
+const transferReceiptRouter = Router();
 
 transferReceiptRouter.get(
   "/getTransferReceiptsByEvent/:event",

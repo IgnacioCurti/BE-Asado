@@ -1,33 +1,42 @@
 import { Request, Response } from "express";
-import { Option } from "../models/option.js";
-import { Event } from "../models/event.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
-import { IEvent, IEventWithMembers, IOption, IUser, IUserName } from "../models/interfaces.js";
-import mongoose from "mongoose";
+import { Option } from "../models/option";
+import { STATUS_CODES } from "../constants/httpStatusCode";
+import { IEvent, IOption, IUserName, ObjectId } from "../models/interfaces";
+import {
+  findByIdAndPopulate,
+  findByIdAndUpdate as findEventByIdAndUpdate,
+  updateOne as updateOneEvent,
+} from "../repositories/eventsRepository";
+import {
+  find as findOption,
+  findByIdAndDelete as findOptionByIdAndDelete,
+  findByIdAndUpdate as findOptionByIdAndUpdate,
+} from "../repositories/optionsRepository";
 
 export async function createOption(
-  req: Request,
+  req: Request<
+    { event: string },
+    any,
+    { title: string; participants: ObjectId[] }
+  >,
   res: Response
 ): Promise<Response> {
   try {
-    const {
-      title,
-      participants,
-    }: { title: string; participants: mongoose.Types.ObjectId[] } = req.body;
+    const { title, participants } = req.body;
 
-    const newOption: IOption = new Option({
+    const newOption = new Option({
       title,
       participants,
     });
 
     await newOption.save();
 
-    await Event.findByIdAndUpdate(req.params.event, {
+    await findEventByIdAndUpdate(req.params.event, {
       $push: { options: newOption._id },
     });
 
     return res.status(STATUS_CODES.CREATED).json(newOption);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
@@ -35,16 +44,17 @@ export async function createOption(
 }
 
 export async function editOptions(
-  req: Request,
+  req: Request<
+    { id: string },
+    any,
+    { title: string; participants: ObjectId[] }
+  >,
   res: Response
 ): Promise<Response> {
   try {
-    const {
-      title,
-      participants,
-    }: { title: string; participants: mongoose.Types.ObjectId[] } = req.body;
+    const { title, participants } = req.body;
 
-    const updatedOption: IOption | null = await Option.findByIdAndUpdate(
+    const updatedOption = await findOptionByIdAndUpdate(
       req.params.id,
       { title, participants },
       { new: true }
@@ -57,7 +67,7 @@ export async function editOptions(
     }
 
     return res.status(STATUS_CODES.OK).json(updatedOption);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
@@ -65,11 +75,11 @@ export async function editOptions(
 }
 
 export async function deleteOption(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const deletedOption = await Option.findByIdAndDelete(req.params.id);
+    const deletedOption = await findOptionByIdAndDelete(req.params.id);
 
     if (!deletedOption) {
       return res
@@ -77,28 +87,36 @@ export async function deleteOption(
         .json({ message: "Option not found" });
     }
 
-    await Event.updateOne(
+    await updateOneEvent(
       { options: deletedOption._id },
       { $pull: { options: deletedOption._id } }
     );
 
     return res.status(STATUS_CODES.OK).json(deletedOption);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
   }
 }
 
-export async function getMembersWhoHaventVoted(req: Request, res: Response) {
+export async function getMembersWhoHaventVoted(
+  req: Request<{ event: string }>,
+  res: Response
+) {
   try {
     interface IEventWithMembersName extends Omit<IEvent, "members"> {
       members: IUserName[];
     }
-    const event: IEventWithMembersName | null = await Event.findById(req.params.event).populate({
-      path: "members",
-      select: "_id name lastName"
-    });
+    const event = await findByIdAndPopulate<IEventWithMembersName>(
+      req.params.event,
+      [
+        {
+          path: "members",
+          select: "_id name lastName",
+        },
+      ]
+    );
 
     if (!event) {
       return res
@@ -106,23 +124,22 @@ export async function getMembersWhoHaventVoted(req: Request, res: Response) {
         .json({ message: "Event not found" });
     }
 
-    const allOptions = await Option.find({ _id: { $in: event.options } });
+    const allOptions = await findOption<IOption>({
+      _id: { $in: event.options },
+    });
     const participantsInOptions = new Set<string>();
     allOptions.forEach((option) => {
-      option.participants.forEach((participantId: mongoose.Types.ObjectId) => {
+      option.participants.forEach((participantId: ObjectId) => {
         participantsInOptions.add(participantId.toString());
       });
     });
 
     const membersWhoHaventVoted = event.members.filter(
-      (member: IUserName) =>
-        !participantsInOptions.has(member._id.toString())
+      (member: IUserName) => !participantsInOptions.has(member._id.toString())
     );
 
-    return res
-      .status(STATUS_CODES.OK)
-      .json({ membersWhoHaventVoted });
-  } catch (error) {
+    return res.status(STATUS_CODES.OK).json({ membersWhoHaventVoted });
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });

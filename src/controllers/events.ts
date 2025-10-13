@@ -1,33 +1,42 @@
 import { Request, Response } from "express";
-import mongoose from "mongoose";
-import { Event } from "../models/event.js";
-import { User } from "../models/user.js";
-import { TransferReceipt } from "../models/transferReceipt.js";
-import { PurchaseReceipt } from "../models/purchaseReceipt.js";
-import { Image } from "../models/image.js";
-import { Rating } from "../models/rating.js";
-import { Reminder } from "../models/reminder.js";
-import { membersWhoHaveUploaded } from "./transferReceipts.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
-import { notifyNewEvent } from "./notifications.js";
+import { Event } from "../models/event";
+import { STATUS_CODES } from "../constants/httpStatusCode";
+import { notifyNewEvent } from "./notifications";
 import {
   IEvent,
   IEventAmountCalculations,
   IEventPopulatedWithOptions,
   IEventWithPurchaseReceipts,
   IEventWithPurchaseReceiptsOptions,
-  IEventWithTransferReceiptsPurchaseReceiptsRatings,
-  IMemberWhoHasUploaded,
   IPublicEvent,
   IPublicEventPreReduction,
   IPurchaseReceipt,
-  IPurchaseReceiptWithUsers,
-  IReminder,
   IRequestWithUser,
-  ITransferInfo,
   IUser,
-  IUserBalance,
-} from "../models/interfaces.js";
+  ObjectId,
+} from "../models/interfaces";
+import {
+  findById as findEventById,
+  findByIdAndPopulate as findEventByIdAndPopulate,
+  findEvents,
+  findPublicAndPrivateEventsAndPopulate,
+  findPublicEventsAndPopulate,
+  EventState,
+  findByIdAndDelete as findEventByIdAndDelete,
+  countElements,
+  findFinishedAndCanceledEvents,
+  membersWhoHaveUploaded,
+} from "../repositories/eventsRepository";
+import {
+  createReminder,
+  deleteReminders,
+  findById as findReminderById,
+  ReminderType,
+} from "../repositories/remindersRepository";
+import { createObjectId, PopulateOption } from "../repositories/utils/mongoose";
+import { findById as findUserById } from "../repositories/usersRepository";
+import { deleteReceipts } from "../repositories/receiptsRepository";
+import { assignEventValues, calculateTransfersInfo } from "../utils/balance";
 
 const eventNotFoundMessage: string =
   "The event with the given ID was not found.";
@@ -37,10 +46,7 @@ export async function getEvents(
   res: Response
 ): Promise<Response> {
   try {
-    const events: IEvent[] = await Event.find().sort({
-      datetime: -1,
-      ":id": 1,
-    });
+    const events = await findEvents();
     return res.json(events);
   } catch (error: any) {
     return res
@@ -54,23 +60,12 @@ export async function getPublicEvents(
   res: Response
 ): Promise<Response> {
   try {
-    const events: IPublicEventPreReduction[] = await Event.find({
-      isPrivate: {
-        $ne: true,
-      },
-    })
-      .select(
-        "datetime description state chef shoppingDesignee memberLimit members title ratings isPrivate penalization penalizationStartDate"
-      )
-      .sort({ datetime: -1 })
-      .populate("chef", "name")
-      .populate("ratings")
-      .populate("shoppingDesignee");
+    const events = await findPublicEventsAndPopulate();
 
-    const publicEvents: IPublicEvent[] = reduceEventsInformation(events);
+    const publicEvents = reduceEventsInformation(events);
 
     return res.status(STATUS_CODES.OK).json(publicEvents);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
@@ -82,28 +77,12 @@ export async function getPublicAndPrivateEvents(
   res: Response
 ): Promise<Response> {
   try {
-    const events: IPublicEventPreReduction[] = await Event.find({
-      $or: [
-        {
-          isPrivate: {
-            $ne: true,
-          },
-        },
-        { isPrivate: true, members: req.user._id },
-      ],
-    })
-      .select(
-        "datetime description state chef shoppingDesignee memberLimit members title ratings isPrivate penalization penalizationStartDate"
-      )
-      .sort({ datetime: -1 })
-      .populate("chef", "name")
-      .populate("ratings")
-      .populate("shoppingDesignee");
+    const events = await findPublicAndPrivateEventsAndPopulate(req.user?._id);
 
-    const allEvents: IPublicEvent[] = reduceEventsInformation(events);
+    const allEvents = reduceEventsInformation(events);
 
     return res.status(STATUS_CODES.OK).json(allEvents);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
@@ -111,32 +90,35 @@ export async function getPublicAndPrivateEvents(
 }
 
 export async function getEventById(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEventPopulatedWithOptions = await Event.findById(req.params.id)
-      .populate("members")
-      .populate("chef")
-      .populate("organizer")
-      .populate("shoppingDesignee")
-      .populate("transferReceipts")
-      .populate("purchaseReceipts")
-      .populate({
-      path: "options",
-      populate: {
-        path: "participants",
-        model: "User",
-        select: "name lastName _id"
+    const fieldsToPopulate: PopulateOption[] = [
+      "members",
+      "chef",
+      "organizer",
+      "shoppingDesignee",
+      "transferReceipts",
+      "purchaseReceipts",
+      {
+        path: "options",
+        populate: {
+          path: "participants",
+          model: "User",
+          select: "name lastName _id",
+        },
       },
-      });
-    if (!event) {
-      return res
-        .status(STATUS_CODES.NOT_FOUND)
-        .json({ message: eventNotFoundMessage });
-    } else {
-      return res.json(event);
-    }
+    ];
+    const event = await findEventByIdAndPopulate<IEventPopulatedWithOptions>(
+      req.params.id,
+      fieldsToPopulate
+    );
+    return !event
+      ? res
+          .status(STATUS_CODES.NOT_FOUND)
+          .json({ message: eventNotFoundMessage })
+      : res.json(event);
   } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
@@ -145,13 +127,11 @@ export async function getEventById(
 }
 
 export async function getMembersAndReceiptsInfo(
-  req: Request,
+  req: Request<{ event: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const answer: IMemberWhoHasUploaded[] = await membersWhoHaveUploaded(
-      req.params.event
-    );
+    const answer = await membersWhoHaveUploaded(req.params.event);
     return res.status(STATUS_CODES.OK).json(answer);
   } catch (error: any) {
     return res
@@ -161,9 +141,9 @@ export async function getMembersAndReceiptsInfo(
 }
 
 async function updateReminders(event: IEvent): Promise<void> {
-  const reminders: IReminder[] = await Reminder.find({ event: event._id });
-  const eventStartReminder: IReminder | undefined = reminders.find(
-    (reminder) => reminder.type === "eventStart"
+  const reminders = await findReminderById(event._id);
+  const eventStartReminder = reminders.find(
+    (reminder) => reminder.type === ReminderType.eventStart
   );
   if (eventStartReminder) {
     eventStartReminder.datetime = new Date(
@@ -171,66 +151,80 @@ async function updateReminders(event: IEvent): Promise<void> {
     );
     await eventStartReminder.save();
   } else {
-    const newEventStartReminder: IReminder = new Reminder({
-      event: event._id,
-      type: "eventStart",
-      datetime: new Date(event.datetime.getTime() - 30 * 60 * 1000),
-    });
-    await newEventStartReminder.save();
+    // Create event start reminder
+    await createReminder(
+      event._id,
+      ReminderType.eventStart,
+      new Date(event.datetime.getTime() - 30 * 60 * 1000)
+    );
   }
 
-  if (event.penalizationStartDate && event.penalization > 0) {
+  if (event.penalizationStartDate && (event.penalization ?? 0) > 0) {
     const penalizationReminderDate: Date = new Date(
       event.penalizationStartDate
     );
     penalizationReminderDate.setDate(penalizationReminderDate.getDate() - 1);
     penalizationReminderDate.setHours(20, 0, 0, 0); // 8 PM the day before penalization starts
 
-    const penalizationStartReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationStart"
+    const penalizationStartReminder = reminders.find(
+      (reminder) => reminder.type === ReminderType.penalizationStart
     );
 
     if (penalizationStartReminder) {
       penalizationStartReminder.datetime = penalizationReminderDate;
       await penalizationStartReminder.save();
     } else {
-      const newPenalizationStartReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationStart",
-        datetime: penalizationReminderDate,
-      });
-      await newPenalizationStartReminder.save();
+      // Create penalization start reminder
+      await createReminder(
+        event._id,
+        ReminderType.penalizationStart,
+        penalizationReminderDate
+      );
     }
 
-    const penalizationOneWeekReminderDate: Date = new Date(
+    const penalizationOneWeekReminderDate = new Date(
       penalizationReminderDate.getTime() + 7 * 24 * 60 * 60 * 1000
     );
-    const penalizationOneWeekReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationOneWeek"
+    const penalizationOneWeekReminder = reminders.find(
+      (reminder) => reminder.type === ReminderType.penalizationOneWeek
     );
     if (penalizationOneWeekReminder) {
       penalizationOneWeekReminder.datetime = penalizationOneWeekReminderDate;
       await penalizationOneWeekReminder.save();
     } else {
-      const newPenalizationOneWeekReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationOneWeek",
-        datetime: penalizationOneWeekReminderDate,
-      });
-      await newPenalizationOneWeekReminder.save();
+      // Create penalization one week reminder
+      await createReminder(
+        event._id,
+        ReminderType.penalizationOneWeek,
+        penalizationOneWeekReminderDate
+      );
     }
   }
 }
 
 export async function createEvent(
-  req: Request,
+  req: Request<
+    any,
+    any,
+    {
+      isChef: boolean;
+      isShoppingDesignee: boolean;
+      organizer: ObjectId;
+    }
+  >,
   res: Response
 ): Promise<Response> {
   try {
     let event: IEvent = new Event(req.body);
-    event.chef = req.body.isChef ? req.body.organizer : null;
-    if (req.body.isShoppingDesignee)
-      event.shoppingDesignee.push(req.body.organizer);
+    const { isChef, isShoppingDesignee, organizer } = req.body;
+    event.chef = isChef ? organizer : null;
+    if (isShoppingDesignee) {
+      if (!event.shoppingDesignee) {
+        event.shoppingDesignee = [];
+      }
+      event.shoppingDesignee.push(organizer);
+    }
+
     event = await event.save();
     await deleteEvents();
     if (!event.isPrivate) {
@@ -246,17 +240,20 @@ export async function createEvent(
 }
 
 export async function subscribeToAnEvent(
-  req: Request,
+  req: Request<{ event: string; id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    if (!req.params.event)
+    const eventId = req.params.event;
+    if (!eventId)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided." });
-    const event: IEventWithPurchaseReceipts | null = await Event.findById(
-      req.params.event
-    ).populate("purchaseReceipts");
+    const fieldsToPopulate: PopulateOption[] = ["purchaseReceipts"];
+    const event = await findEventByIdAndPopulate<IEventWithPurchaseReceipts>(
+      eventId,
+      fieldsToPopulate
+    );
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
@@ -265,16 +262,16 @@ export async function subscribeToAnEvent(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The event is full." });
-    if (event.state !== "available")
+    if (event.state !== EventState.available)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The event is not available for users to join" });
-    if (event.members.includes(new mongoose.Types.ObjectId(req.params.id))) {
+    if (event.members.includes(createObjectId(req.params.id))) {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The user has already joined the event" });
     }
-    const user: IUser | null = await User.findById(req.params.id);
+    const user = await findUserById<IUser>(req.params.id);
     if (!user) {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
@@ -295,7 +292,7 @@ export async function subscribeToAnEvent(
 }
 
 export async function unsubscribeFromEvent(
-  req: Request,
+  req: Request<{ event: string; id: string }>,
   res: Response
 ): Promise<Response> {
   try {
@@ -303,28 +300,30 @@ export async function unsubscribeFromEvent(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided." });
-    const event: IEventWithPurchaseReceiptsOptions | null =
-      await Event.findById(req.params.event)
-        .populate("purchaseReceipts")
-        .populate("options");
+    const event =
+      await findEventByIdAndPopulate<IEventWithPurchaseReceiptsOptions>(
+        req.params.event,
+        ["purchaseReceipts", "options"]
+      );
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
-    const index: number = event.members.indexOf(
-      new mongoose.Types.ObjectId(req.params.id)
-    );
+    const index = event.members.indexOf(createObjectId(req.params.id));
     if (index === -1)
       return res.status(STATUS_CODES.NOT_FOUND).json({
         message: "The member with the given ID is not part of the event.",
       });
-    const user: IUser | null = await User.findById(req.params.id);
+    const user = await findUserById<IUser>(req.params.id);
     if (!user) {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The user with the given ID was not found." });
     }
-    if (event.state == "closed" || event.state == "readyforpayment")
+    if (
+      event.state == EventState.closed ||
+      event.state == EventState.readyForPayment
+    )
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message:
           "The user can't unsubscribe from the event if it's closed or ready for payment.",
@@ -352,32 +351,46 @@ export async function unsubscribeFromEvent(
 }
 
 export async function editRoles(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEvent | null = await Event.findById(req.params.id);
+    const event = await findEventById(req.params.id);
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
-    event.chef = req.body.chef ? req.body.chef : null;
-    event.shoppingDesignee = req.body.shoppingDesignee;
+    const { chef, shoppingDesignee } = req.body;
+    event.chef = chef ?? null;
+    event.shoppingDesignee = shoppingDesignee;
     await event.save();
-    res.status(STATUS_CODES.OK).json(event);
+    return res.status(STATUS_CODES.OK).json(event);
   } catch (error: any) {
-    res
+    return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
   }
 }
 
 export async function editEvent(
-  req: Request,
+  req: Request<
+    { id: string },
+    any,
+    {
+      title: string;
+      datetime: Date;
+      description: string;
+      memberLimit: number;
+      penalization: number;
+      penalizationStartDate: Date;
+      state: string;
+      isPrivate: boolean;
+    }
+  >,
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEvent | null = await Event.findById(req.params.id);
+    const event = await findEventById(req.params.id);
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
@@ -391,7 +404,10 @@ export async function editEvent(
       req.body.penalization > 0 ? req.body.penalizationStartDate : null;
     event.state = req.body.state;
     event.isPrivate = req.body.isPrivate;
-    if (event.shoppingDesignee.length == 0 && event.state !== "available")
+    if (
+      event.shoppingDesignee?.length == 0 &&
+      event.state !== EventState.available
+    )
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: "The event has no shopping designees.",
       });
@@ -405,29 +421,19 @@ export async function editEvent(
   }
 }
 
-async function deleteReminders(
-  eventId: mongoose.Types.ObjectId
-): Promise<void> {
-  try {
-    await Reminder.deleteMany({ event: eventId });
-  } catch (error) {
-    console.error("Error deleting reminders:", error);
-  }
-}
-
 export async function deleteEvent(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const event = await Event.findById(req.params.id);
+    const event = await findEventById(req.params.id);
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
     await deleteReceipts(event._id);
     await deleteReminders(event._id);
-    await Event.findByIdAndDelete(req.params.id);
+    await findEventByIdAndDelete(req.params.id);
     return res.status(STATUS_CODES.OK).json(event);
   } catch (error: any) {
     return res
@@ -437,56 +443,19 @@ export async function deleteEvent(
 }
 
 async function deleteEvents(): Promise<void> {
-  const totalEvents: number = await Event.count({ isPrivate: false });
+  const totalEvents = await countElements({ isPrivate: false });
   if (totalEvents > 6) {
-    let matches: IEvent[] = await Event.find({
-      state: {
-        $in: ["finished", "cancelled"],
-      },
-    }).sort({ datetime: "asc" });
+    let matches: IEvent[] = await findFinishedAndCanceledEvents();
     const eventsToDelete: number = Math.min(totalEvents - 6, matches.length);
 
     for (let i = 0; i < eventsToDelete; i++) {
-      const deletedId: mongoose.Types.ObjectId = matches[0]._id;
+      const deletedId = matches[0]._id;
       matches = matches.slice(1);
       await deleteReminders(deletedId);
       await deleteReceipts(deletedId);
-      const deletedEvent: IEvent | null = await Event.findByIdAndDelete(
-        deletedId
-      );
+      await findEventByIdAndDelete(deletedId);
     }
   }
-}
-
-async function deleteReceipts(eventId: mongoose.Types.ObjectId): Promise<void> {
-  const event: IEventWithTransferReceiptsPurchaseReceiptsRatings =
-    await Event.findById(eventId).populate([
-      "transferReceipts",
-      "purchaseReceipts",
-      "ratings",
-    ]);
-
-  await Promise.all(
-    event.transferReceipts.map(async (transferReceipt) => {
-      if (transferReceipt.image)
-        await Image.findByIdAndDelete(transferReceipt.image);
-      await TransferReceipt.findByIdAndDelete(transferReceipt._id);
-    })
-  );
-
-  await Promise.all(
-    event.purchaseReceipts.map(async (purchaseReceipt) => {
-      if (purchaseReceipt.image)
-        await Image.findByIdAndDelete(purchaseReceipt.image);
-      await PurchaseReceipt.findByIdAndDelete(purchaseReceipt._id);
-    })
-  );
-
-  await Promise.all(
-    event.ratings.map(async (rating) => {
-      await Rating.findByIdAndDelete(rating);
-    })
-  );
 }
 
 function reduceEventsInformation(
@@ -494,133 +463,56 @@ function reduceEventsInformation(
 ): IPublicEvent[] {
   let reducedEvents: IPublicEvent[] = [];
   for (let event of events) {
-    let eventRating: number = event.ratings
-      ? event.ratings.reduce(
-          (sum, currentRating) => sum + currentRating.score,
-          0
-        )
-      : 0; // esto es porque eventos viejos no tienen el atributo
+    let eventRating = 0;
+    let avgScore = 0;
+    let ratingsAmount = 0;
+
+    if (event.ratings) {
+      eventRating = event.ratings.reduce(
+        (sum, currentRating) => sum + currentRating.score,
+        0
+      );
+      ratingsAmount = event.ratings.length;
+      if (event.ratings.length > 0) {
+        avgScore = eventRating / event.ratings.length;
+      }
+    }
+    const {
+      _id,
+      title,
+      datetime,
+      description,
+      state,
+      chef,
+      shoppingDesignee,
+      memberLimit,
+      members,
+      isPrivate,
+      penalization,
+      penalizationStartDate,
+    } = event;
+
     reducedEvents.push({
-      _id: event._id,
-      title: event.title,
-      datetime: event.datetime,
-      description: event.description,
-      state: event.state,
-      chef: event.chef ? event.chef.name : null,
-      shoppingDesignee: event.shoppingDesignee,
-      memberLimit: event.memberLimit,
-      members: event.members.length,
-      ratings: {
-        avgScore: event.ratings
-          ? event.ratings.length > 0
-            ? eventRating / event.ratings.length
-            : 0
-          : 0, // esto es porque eventos viejos no tienen el atributo
-        ratingsAmount: event.ratings ? event.ratings.length : 0, // esto es porque eventos viejos no tienen el atributo
-      },
-      isPrivate: event.isPrivate ? event.isPrivate : false, // esto es porque eventos viejos no tienen el atributo
-      penalization: event.penalization ? event.penalization : null, // y asi hay backwards compatibility, SACAR CUANDO NO HAYA EVENTOS SIN ESTOS ATRIBUTOS
-      penalizationStartDate: event.penalizationStartDate
-        ? event.penalizationStartDate
-        : null,
+      _id,
+      title,
+      datetime,
+      description,
+      state,
+      chef: chef ? chef.name : "No chef assigned",
+      shoppingDesignee,
+      memberLimit,
+      members: members.length,
+      ratings: { avgScore, ratingsAmount },
+      isPrivate: isPrivate || false, // esto es porque eventos viejos no tienen el atributo
+      penalization: penalization || null, // y asi hay backwards compatibility, SACAR CUANDO NO HAYA EVENTOS SIN ESTOS ATRIBUTOS
+      penalizationStartDate: penalizationStartDate || null,
     });
   }
   return reducedEvents;
 }
 
-export function calculateTransfersInfo(
-  amounts: IUserBalance[]
-): ITransferInfo[] {
-  const transferInfo: ITransferInfo[] = [];
-
-  while (amounts.length > 0) {
-    amounts.sort((a, b) => a.totalCost - b.totalCost);
-    let payer: IUserBalance = amounts[0];
-    if (payer.totalCost == 0) {
-      transferInfo.push({
-        userId: payer.userId,
-        userName: payer.userName,
-        amount: payer.totalCost,
-        receiver: null,
-      });
-      amounts.splice(0, 1);
-      continue;
-    }
-    let receiver: IUserBalance = amounts[amounts.length - 1];
-    transferInfo.push({
-      userId: payer.userId,
-      userName: payer.userName,
-      amount: payer.totalCost * -1,
-      receiver: {
-        receiverId: receiver.userId,
-        receiverName: receiver.userName,
-        receiverLastName: receiver.userLastName,
-        receiverCbu: receiver.userCbu,
-        receiverAlias: receiver.userAlias,
-      },
-    });
-    const updatedAmount: number = Number(
-      (amounts[amounts.length - 1].totalCost + payer.totalCost).toFixed(2)
-    );
-    amounts[amounts.length - 1].totalCost = updatedAmount;
-    amounts.splice(0, 1);
-  }
-  return transferInfo;
-}
-
-export function assignEventValues(
-  receipts: IPurchaseReceiptWithUsers[]
-): IUserBalance[] {
-  const userBalances: IUserBalance[] = [];
-  for (const receipt of receipts) {
-    const receiptCostPerUser: number = Number(
-      (receipt.amount / receipt.participants.length).toFixed(2)
-    );
-    for (const participant of receipt.participants) {
-      let participantEntry: IUserBalance | undefined = userBalances.find((a) =>
-        participant._id.equals(a.userId)
-      );
-      if (participantEntry) {
-        participantEntry.totalCost = Number(
-          (participantEntry.totalCost - receiptCostPerUser).toFixed(2)
-        );
-      } else {
-        userBalances.push({
-          userId: participant._id,
-          userName: participant.name,
-          userLastName: participant.lastName,
-          userCbu: participant.cbu,
-          userAlias: participant.alias,
-          totalCost: -receiptCostPerUser,
-        });
-      }
-    }
-    const cleanReceiptAmount: number = Number(
-      (receiptCostPerUser * receipt.participants.length).toFixed(2)
-    );
-    const designeeEntry: IUserBalance | undefined = userBalances.find((a) =>
-      receipt.shoppingDesignee._id.equals(a.userId)
-    );
-    if (designeeEntry) {
-      designeeEntry.totalCost = Number(
-        (designeeEntry.totalCost + cleanReceiptAmount).toFixed(2)
-      );
-    } else {
-      userBalances.push({
-        userId: receipt.shoppingDesignee._id,
-        userName: receipt.shoppingDesignee.name,
-        userLastName: receipt.shoppingDesignee.lastName,
-        userCbu: receipt.shoppingDesignee.cbu,
-        userAlias: receipt.shoppingDesignee.alias,
-        totalCost: cleanReceiptAmount,
-      });
-    }
-  }
-  return userBalances;
-}
-
 export async function getMembersAmount(
-  req: Request,
+  req: Request<{ event: string }>,
   res: Response
 ): Promise<Response> {
   try {
@@ -628,29 +520,30 @@ export async function getMembersAmount(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided" });
-    const event: IEventAmountCalculations = await Event.findById(
-      req.params.event
-    )
-      .select("purchaseReceipts members")
-      .populate([
-        {
-          path: "purchaseReceipts",
-          populate: [
-            {
-              path: "shoppingDesignee",
-              model: "User",
-            },
-            {
-              path: "participants",
-              model: "User",
-            },
-          ],
-        },
-        {
-          path: "members",
-          model: "User",
-        },
-      ]);
+    const fieldsToPopulate: PopulateOption[] = [
+      {
+        path: "purchaseReceipts",
+        populate: [
+          {
+            path: "shoppingDesignee",
+            model: "User",
+          },
+          {
+            path: "participants",
+            model: "User",
+          },
+        ],
+      },
+      {
+        path: "members",
+        model: "User",
+      },
+    ];
+    const event = await findEventByIdAndPopulate<IEventAmountCalculations>(
+      req.params.event,
+      fieldsToPopulate,
+      "purchaseReceipts members"
+    );
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
@@ -659,12 +552,10 @@ export async function getMembersAmount(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The event has no purchase receipts." });
-    const userBalances: IUserBalance[] = assignEventValues(
-      event.purchaseReceipts
-    );
-    const transferInfo: ITransferInfo[] = calculateTransfersInfo(userBalances);
+    const userBalances = assignEventValues(event.purchaseReceipts);
+    const transferInfo = calculateTransfersInfo(userBalances);
     return res.status(STATUS_CODES.OK).json(transferInfo);
-  } catch (e) {
+  } catch (e: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: e.message });
@@ -672,52 +563,53 @@ export async function getMembersAmount(
 }
 
 export async function getMemberIndividualCost(
-  req: Request,
+  req: Request<{ event: string; user: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    if (!req.params.event)
+    const { event: eventId, user } = req.params;
+    if (!eventId)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided" });
-    if (!req.params.user)
+    if (!user)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No user ID provided" });
-    const event: IEventWithPurchaseReceipts = await Event.findById(
-      req.params.event
-    ).populate("purchaseReceipts");
+
+    const event = await findEventByIdAndPopulate<IEventWithPurchaseReceipts>(
+      eventId,
+      ["purchaseReceipts"]
+    );
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
-    if (!event.members.includes(new mongoose.Types.ObjectId(req.params.user)))
+    if (!event.members.includes(createObjectId(user)))
       return res
         .status(STATUS_CODES.FORBIDDEN)
         .json({ message: "User is not a member of the event" });
-    if (event.state !== "finished" && event.state !== "readyforpayment")
-      return res
-        .status(STATUS_CODES.FORBIDDEN)
-        .json({
-          message:
-            "Event state needs to be either finished or ready for payment",
-        });
+    if (
+      event.state !== EventState.finished &&
+      event.state !== EventState.readyForPayment
+    )
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message: "Event state needs to be either finished or ready for payment",
+      });
     const userReceipts: IPurchaseReceipt[] = event.purchaseReceipts.filter(
-      (receipt) =>
-        receipt.participants.some((p) =>
-          p._id.equals(new mongoose.Types.ObjectId(req.params.user))
-        )
+      ({ participants }) =>
+        participants.some((p) => p._id.equals(createObjectId(user)))
     );
 
-    const userAmount: number = userReceipts.reduce(
-      (total: number, receipt: IPurchaseReceipt) => {
-        total += receipt.amount / receipt.participants.length;
+    const userAmount = userReceipts.reduce(
+      (total, { amount, participants }: IPurchaseReceipt) => {
+        total += amount / participants.length;
         return total;
       },
       0
     );
 
-    return res.status(STATUS_CODES.OK).json({ userAmount: userAmount });
+    return res.status(STATUS_CODES.OK).json({ userAmount });
   } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)

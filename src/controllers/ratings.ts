@@ -1,37 +1,46 @@
-import mongoose from "mongoose";
-import { Rating } from "../models/rating.js";
-import { Event } from "../models/event.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { Rating } from "../models/rating";
+import { STATUS_CODES } from "../constants/httpStatusCode";
 import { Request, Response } from "express";
-import { IRating, IEvent } from "../models/interfaces.js";
+import { IRating, IEvent } from "../models/interfaces";
+import {
+  EventState,
+  findByIdAndPopulate as findEventByIdAndPopulate,
+} from "../repositories/eventsRepository";
+import { createObjectId } from "../repositories/utils/mongoose";
 
 interface IEventWithRatings extends Omit<IEvent, "ratings"> {
   ratings: IRating[];
 }
 
 export async function createRating(
-  req: Request,
+  req: Request<{ event: string; user: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEventWithRatings | null = await Event.findById(
-      req.params.event
-    ).populate("ratings");
+    const { event: eventId, user: userId } = req.params;
+    const event = await findEventByIdAndPopulate<IEventWithRatings>(eventId, [
+      "ratings",
+    ]);
+
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: "The event with the given ID was not found." });
-    if (!event.members.includes(new mongoose.Types.ObjectId(req.params.user)))
+
+    if (!event.members.includes(createObjectId(userId)))
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: "The user with the given ID was not found in the event.",
       });
-    if (event.state == "available" || event.state == "cancelled")
+
+    if (
+      event.state == EventState.available ||
+      event.state == EventState.cancelled
+    )
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The event is not closed or finished." });
-    const rating: IRating | undefined = event.ratings.find((r) =>
-      r.user.equals(req.params.user)
-    );
+
+    const rating = event.ratings.find((r) => r.user.equals(userId));
     if (rating) {
       rating.score = req.body.score;
       await rating.save();
@@ -40,7 +49,7 @@ export async function createRating(
     } else {
       const newRating: IRating = new Rating({
         score: req.body.score,
-        user: req.params.user,
+        user: userId,
       });
       event.ratings.push(newRating);
       await newRating.save();
@@ -55,21 +64,25 @@ export async function createRating(
 }
 
 export async function getRatingFromUser(
-  req: Request,
+  req: Request<{ event: string; user: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEventWithRatings | null = await Event.findById(
-      req.params.event
-    ).populate("ratings");
+    const event = await findEventByIdAndPopulate<IEventWithRatings>(
+      req.params.event,
+      ["ratings"]
+    );
+
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: "The event with the given ID was not found." });
-    if (!event.members.includes(new mongoose.Types.ObjectId(req.params.user)))
+
+    if (!event.members.includes(createObjectId(req.params.user)))
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: "The user with the given ID was not found in the event.",
       });
+
     const rating = event.ratings.find((r) => r.user.equals(req.params.user));
     if (rating) {
       return res.status(STATUS_CODES.OK).json(rating);

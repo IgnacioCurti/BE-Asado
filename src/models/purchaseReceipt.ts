@@ -1,5 +1,5 @@
 import mongoose, { Model } from "mongoose";
-import { IPurchaseReceipt } from "./interfaces.js";
+import { IPurchaseReceipt } from "./interfaces";
 
 const purchaseReceiptSchema: mongoose.Schema =
   new mongoose.Schema<IPurchaseReceipt>({

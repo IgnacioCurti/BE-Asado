@@ -1,7 +1,7 @@
-import express from "express";
-import { forgot, verifyCode, recover } from "../controllers/password.js";
+import { Router } from "express";
+import { forgot, verifyCode, recover } from "../controllers/password";
 
-const passwordRouter: express.Router = express.Router();
+const passwordRouter = Router();
 
 passwordRouter.post("/forgot", forgot);
 

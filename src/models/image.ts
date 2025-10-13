@@ -1,5 +1,5 @@
 import mongoose, { Model } from "mongoose";
-import { IImage } from "./interfaces.js";
+import { IImage } from "./interfaces";
 
 const imageSchema: mongoose.Schema = new mongoose.Schema<IImage>({
   name: { type: String },

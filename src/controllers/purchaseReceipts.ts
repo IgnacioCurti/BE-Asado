@@ -1,18 +1,26 @@
-import mongoose from "mongoose";
 import { Request, Response } from "express";
-import { PurchaseReceipt } from "../models/purchaseReceipt.js";
-import { Event } from "../models/event.js";
-import { saveImage } from "./images.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { PurchaseReceipt } from "../models/purchaseReceipt";
+import { STATUS_CODES } from "../constants/httpStatusCode";
 import {
   IRequestWithUser,
-  IEvent,
   IEventWithPurchaseReceiptsPopulated,
   IPurchaseReceipt,
-} from "../models/interfaces.js";
+  ObjectId,
+} from "../models/interfaces";
+import { saveImage } from "../repositories/imageRepository";
+import {
+  EventState,
+  findById as findEventById,
+  findByIdAndPopulate as findEventByIdAndPopulate,
+} from "../repositories/eventsRepository";
+import {
+  findPurchaseReceiptById,
+  findPurchaseReceiptByIdAndDelete,
+} from "../repositories/receiptsRepository";
+import { createObjectId } from "../repositories/utils/mongoose";
 
 export async function getPurchaseReceiptsByEvent(
-  req: Request,
+  req: Request<{ event: string }>,
   res: Response
 ): Promise<Response> {
   try {
@@ -20,28 +28,26 @@ export async function getPurchaseReceiptsByEvent(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided" });
-    const event: IEventWithPurchaseReceiptsPopulated | null =
-      await Event.findById(req.params.event).populate([
-        {
-          path: "purchaseReceipts",
-          populate: [
-            {
-              path: "shoppingDesignee",
-              model: "User",
-            },
-            {
-              path: "participants",
-              model: "User",
-            },
-          ],
-        },
-      ]);
+    const event =
+      await findEventByIdAndPopulate<IEventWithPurchaseReceiptsPopulated>(
+        req.params.event,
+        [
+          {
+            path: "purchaseReceipts",
+            populate: [
+              { path: "shoppingDesignee", model: "User" },
+              { path: "participants", model: "User" },
+            ],
+          },
+        ]
+      );
+
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: "The event with the given ID was not found." });
     return res.status(STATUS_CODES.OK).json(event.purchaseReceipts);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -49,13 +55,11 @@ export async function getPurchaseReceiptsByEvent(
 }
 
 export async function getPurchaseReceiptById(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const purchaseReceipt: IPurchaseReceipt = await PurchaseReceipt.findById(
-      req.params.id
-    );
+    const purchaseReceipt = await findPurchaseReceiptById(req.params.id);
     if (!purchaseReceipt) {
       return res.status(STATUS_CODES.NOT_FOUND).json({
         message: "The purchase receipt with the given ID was not found.",
@@ -63,7 +67,7 @@ export async function getPurchaseReceiptById(
     } else {
       return res.status(STATUS_CODES.OK).json(purchaseReceipt);
     }
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -76,9 +80,10 @@ export async function uploadFilePurchaseReceipt(
 ): Promise<Response> {
   try {
     if (req.file) {
-      const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
-      let purchaseReceipt: IPurchaseReceipt | null =
-        await PurchaseReceipt.findById(req.params.purchaseReceipt);
+      const imageId = await saveImage(req.file);
+      let purchaseReceipt = await findPurchaseReceiptById(
+        req.params.purchaseReceipt
+      );
       if (!purchaseReceipt) {
         return res.status(STATUS_CODES.NOT_FOUND).json({
           message: "The purchase receipt with the given ID was not found.",
@@ -87,8 +92,12 @@ export async function uploadFilePurchaseReceipt(
       purchaseReceipt.image = imageId;
       await purchaseReceipt.save();
       return res.status(STATUS_CODES.OK).json({ imageId: imageId });
+    } else {
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "No file provided",
+      });
     }
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -100,25 +109,27 @@ export async function createPurchaseReceipt(
   res: Response
 ): Promise<Response> {
   try {
-    const event: IEvent | null = await Event.findById(req.params.event);
-    if (event.state !== "closed")
+    const event = await findEventById(req.params.event);
+    if (!event)
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: "The event with the given ID was not found." });
+
+    if (event.state !== EventState.closed)
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message:
           "Purchase receipts can only be uploaded when the event is closed",
       });
+
     let purchaseReceipt: IPurchaseReceipt = new PurchaseReceipt(req.body);
     purchaseReceipt.event = event._id;
-    purchaseReceipt.shoppingDesignee = new mongoose.Types.ObjectId(
-      req.user._id
-    );
-    purchaseReceipt.participants = req.body.participants
-      ? req.body.participants
-      : event.members;
+    purchaseReceipt.shoppingDesignee = createObjectId(req.user?._id as string);
+    purchaseReceipt.participants = req.body.participants || event.members;
     purchaseReceipt = await purchaseReceipt.save();
     event.purchaseReceipts.push(purchaseReceipt._id);
     await event.save();
     return res.status(STATUS_CODES.CREATED).json(purchaseReceipt);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -126,25 +137,29 @@ export async function createPurchaseReceipt(
 }
 
 export async function assignMembersToReceipt(
-  req: Request,
+  req: Request<
+    any,
+    any,
+    { receipts: { id: string; participants: ObjectId[] }[] }
+  >,
   res: Response
 ): Promise<Response> {
   try {
-    for (const receipt of req.body.receipts) {
-      const purchaseReceipt: IPurchaseReceipt = await PurchaseReceipt.findById(
-        receipt.id
-      );
+    for (const { id, participants } of req.body.receipts) {
+      const purchaseReceipt = await findPurchaseReceiptById(id);
       if (!purchaseReceipt)
         return res
           .status(STATUS_CODES.NOT_FOUND)
           .json({ message: "One or more purchase receipts were not found" });
-      purchaseReceipt.participants = receipt.participants;
+
+      purchaseReceipt.participants = participants;
       await purchaseReceipt.save();
     }
+
     return res
       .status(STATUS_CODES.OK)
       .json({ message: "Participants assigned to receipts successfully" });
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -152,18 +167,24 @@ export async function assignMembersToReceipt(
 }
 
 export async function deletePurchaseReceipt(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const purchaseReceipt: IPurchaseReceipt | null =
-      await PurchaseReceipt.findById(req.params.id);
+    const purchaseReceipt = await findPurchaseReceiptById(req.params.id);
     if (!purchaseReceipt)
       return res.status(STATUS_CODES.NOT_FOUND).json({
         message: "The purchase receipt with the given ID was not found.",
       });
-    const event = await Event.findById(purchaseReceipt.event);
-    if (event.state !== "closed")
+
+    const event = await findEventById(purchaseReceipt.event);
+
+    if (!event)
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: "The event with the given ID was not found." });
+
+    if (event.state !== EventState.closed)
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message:
           "Purchase receipts can only be uploaded or deleted when the event is closed",
@@ -171,9 +192,9 @@ export async function deletePurchaseReceipt(
     const index: number = event.purchaseReceipts.indexOf(purchaseReceipt._id);
     event.purchaseReceipts.splice(index, 1);
     await event.save();
-    await PurchaseReceipt.findByIdAndDelete(req.params.id);
+    await findPurchaseReceiptByIdAndDelete(req.params.id);
     return res.status(STATUS_CODES.OK).json(purchaseReceipt);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });

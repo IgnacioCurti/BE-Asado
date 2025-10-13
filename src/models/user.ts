@@ -1,8 +1,8 @@
 import mongoose, { Model } from "mongoose";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
-import { jwtPrivateKey } from "../config.js";
-import { IUser } from "./interfaces.js";
+import { sign } from "jsonwebtoken";
+import { compare } from "bcrypt";
+import { jwtPrivateKey } from "../config";
+import { IUser } from "./interfaces";
 
 const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
   name: { type: String, required: true },
@@ -17,7 +17,9 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
       validator: function (v: string): boolean {
         if (!v) return false;
         if (v == "davidmartingallegos@gmail.com") return true;
-        let username: string, domain: string, rest: string[];
+        let username: string;
+        let domain: string;
+        let rest: string[];
         [username, domain, ...rest] = v.split("@");
         if (rest.length) return false;
         if (domain !== "endava.com") return false;
@@ -33,7 +35,9 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
     validate: {
       validator: function (v: string | null): boolean {
         if (v == null) return true;
-        let username: string, domain: string, rest: string[];
+        let username: string;
+        let domain: string;
+        let rest: string[];
         [username, domain, ...rest] = v.split("@");
         if (rest.length) return false;
         return true;
@@ -87,7 +91,7 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
 });
 
 userSchema.methods.generateAuthToken = function (this: IUser): string {
-  return jwt.sign({ _id: this._id, email: this.email }, jwtPrivateKey);
+  return sign({ _id: this._id, email: this.email }, jwtPrivateKey);
 };
 
 userSchema.methods.isValidPassword = async function (
@@ -95,7 +99,7 @@ userSchema.methods.isValidPassword = async function (
   password: string
 ): Promise<boolean> {
   try {
-    return await bcrypt.compare(password, this.password);
+    return await compare(password, this.password);
   } catch (error) {
     throw error;
   }
