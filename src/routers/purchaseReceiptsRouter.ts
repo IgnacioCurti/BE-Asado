@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   getPurchaseReceiptsByEvent,
   getPurchaseReceiptById,
@@ -6,15 +6,15 @@ import {
   uploadFilePurchaseReceipt,
   createPurchaseReceipt,
   deletePurchaseReceipt,
-} from "../controllers/purchaseReceipts.js";
+} from "../controllers/purchaseReceipts";
 import {
   auth,
   shoppingDesignee,
   eventParticipant,
   multerUpload,
-} from "../middleware/middleware.js";
+} from "../middleware/middleware";
 
-const purchaseReceiptRouter: express.Router = express.Router();
+const purchaseReceiptRouter = Router();
 
 purchaseReceiptRouter.get(
   "/getPurchaseReceiptsByEvent/:event",

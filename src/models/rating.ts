@@ -1,5 +1,5 @@
 import mongoose, { Model } from "mongoose";
-import { IRating } from "./interfaces.js";
+import { IRating } from "./interfaces";
 
 const ratingSchema: mongoose.Schema = new mongoose.Schema<IRating>({
   score: {

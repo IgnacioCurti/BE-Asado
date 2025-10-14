@@ -1,37 +1,42 @@
-import bcrypt from "bcrypt";
+import { compare, genSalt, hash } from "bcrypt";
 import { Request, Response } from "express";
-import { User } from "../models/user.js";
-import { sendEmail } from "../utils/utils.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
-import { passwordRecoveryTemplate } from "../utils/templates.js";
-import { IUser } from "../models/interfaces.js";
+import { sendEmail } from "../utils/utils";
+import { STATUS_CODES } from "../constants/httpStatusCode";
+import { passwordRecoveryTemplate } from "../utils/templates";
+import { IUser } from "../models/interfaces";
+import { findOne as findOneUser } from "../repositories/usersRepository";
 
 const nonExistentUserMessage: string = "User does not exist.";
 
-export async function forgot(req: Request, res: Response): Promise<Response> {
+export async function forgot(
+  req: Request<any, any, { email: string }>,
+  res: Response
+): Promise<Response> {
   try {
     req.body.email = req.body.email.toLowerCase();
-    let user: IUser | null = await User.findOne({ email: req.body.email });
-    if (!user) user = await User.findOne({ alternativeEmail: req.body.email });
+    let user = await findOneUser<IUser>({ email: req.body.email });
+
+    if (!user)
+      user = await findOneUser<IUser>({ alternativeEmail: req.body.email });
+
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: nonExistentUserMessage });
-    const code: number = Math.floor(Math.random() * 900000) + 100000;
-    const salt: string = await bcrypt.genSalt(10);
-    user.verificationCode = await bcrypt.hash(code.toString(), salt);
+
+    const code = Math.floor(Math.random() * 900000) + 100000;
+    const salt = await genSalt(10);
+    user.verificationCode = await hash(code.toString(), salt);
     await user.save();
-    const email: string = user.alternativeEmail
-      ? user.alternativeEmail
-      : user.email;
-    const subject: string = "FoodSpot | Recuperar contraseña";
-    const message: string = passwordRecoveryTemplate(code.toString());
+    const email = user.alternativeEmail || user.email;
+    const subject = "FoodSpot | Recuperar contraseña";
+    const message = passwordRecoveryTemplate(code.toString());
 
     await sendEmail(email, subject, user.name, message);
     return res
       .status(STATUS_CODES.OK)
-      .json({ message: `Mail sent succesfully to ${email}.` });
-  } catch (error) {
+      .json({ message: `Mail sent successfully to ${email}.` });
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -39,21 +44,22 @@ export async function forgot(req: Request, res: Response): Promise<Response> {
 }
 
 export async function verifyCode(
-  req: Request,
+  req: Request<any, any, { email: string; verificationCode: string }>,
   res: Response
 ): Promise<Response> {
   try {
     req.body.email = req.body.email.toLowerCase();
-    const user: IUser | null = await User.findOne({
+    const user = await findOneUser<IUser>({
       email: req.body.email,
-    }).exec();
+    });
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: nonExistentUserMessage });
-    const validCode: boolean = await bcrypt.compare(
+
+    const validCode = await compare(
       req.body.verificationCode,
-      user.verificationCode
+      user.verificationCode as string
     );
     if (validCode) {
       return res
@@ -64,19 +70,26 @@ export async function verifyCode(
         .status(STATUS_CODES.BAD_REQUEST)
         .json("Invalid verification code.");
     }
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
   }
 }
 
-export async function recover(req: Request, res: Response): Promise<Response> {
+export async function recover(
+  req: Request<
+    any,
+    any,
+    { email: string; verificationCode: string; password: string }
+  >,
+  res: Response
+) {
   try {
     req.body.email = req.body.email.toLowerCase();
-    const user: IUser | null = await User.findOne({
+    const user = await findOneUser<IUser>({
       email: req.body.email,
-    }).exec();
+    });
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
@@ -85,22 +98,22 @@ export async function recover(req: Request, res: Response): Promise<Response> {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "User never requested a password change." });
-    const validCode: boolean = await bcrypt.compare(
+    const validCode = await compare(
       req.body.verificationCode,
-      user.verificationCode
+      user.verificationCode as string
     );
     if (!validCode)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Invalid verification code." });
-    const salt: string = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(req.body.password, salt);
+    const salt = await genSalt(10);
+    user.password = await hash(req.body.password, salt);
     user.verificationCode = null;
     await user.save();
     return res
       .status(STATUS_CODES.OK)
       .json({ message: "Password was updated correctly." });
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });

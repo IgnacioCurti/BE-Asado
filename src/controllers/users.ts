@@ -1,32 +1,42 @@
 import { Request, Response } from "express";
-import bcrypt from "bcrypt";
-import { User } from "../models/user.js";
-import { Image } from "../models/image.js";
-import { Event } from "../models/event.js";
-import { TransferReceipt } from "../models/transferReceipt.js";
-import { assignEventValues, calculateTransfersInfo } from "./events.js";
-import { saveImage } from "./images.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { genSalt, hash } from "bcrypt";
+import { User } from "../models/user";
+import { STATUS_CODES } from "../constants/httpStatusCode";
 import {
   IEventAmountCalculationsWithTransfers,
   IEventWithMembersPurchaseReceiptsPopulated,
-  IImage,
   ISafeUser,
-  ITransferInfo,
-  ITransferReceipt,
   IUser,
-} from "../models/interfaces.js";
-import mongoose from "mongoose";
+  ObjectId,
+} from "../models/interfaces";
+import {
+  findOneAndDelete as findOneImageAndDelete,
+  saveImage,
+} from "../repositories/imageRepository";
+import {
+  findById as findUserById,
+  findOne as findOneUser,
+  find as findUser,
+  findByIdAndRemove as findUserByIdAndRemove,
+} from "../repositories/usersRepository";
+import { assignEventValues, calculateTransfersInfo } from "../utils/balance";
+import {
+  EventState,
+  findAndPopulate as findEventsAndPopulate,
+} from "../repositories/eventsRepository";
+import { findOneTransferReceipt } from "../repositories/receiptsRepository";
+import { createObjectId } from "../repositories/utils/mongoose";
 
 const userNotFoundMessage = "The user with the given ID was not found.";
 
 export async function getUsers(req: Request, res: Response): Promise<Response> {
   try {
-    const users: ISafeUser[] = await User.find().select(
+    const users = await findUser<ISafeUser>(
+      undefined,
       "-password -verificationCode"
     );
     return res.status(STATUS_CODES.OK).json(users);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -34,11 +44,12 @@ export async function getUsers(req: Request, res: Response): Promise<Response> {
 }
 
 export async function getUserById(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const user: ISafeUser | null = await User.findById(req.params.id).select(
+    const user = await findUserById<ISafeUser>(
+      req.params.id,
       "-password -verificationCode"
     );
     if (!user) {
@@ -48,33 +59,40 @@ export async function getUserById(
     } else {
       return res.status(STATUS_CODES.OK).json(user);
     }
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
   }
 }
 
-export async function isDebtor(req: Request, res: Response): Promise<Response> {
+export async function isDebtor(
+  req: Request<{ id: string }>,
+  res: Response
+): Promise<Response> {
   try {
-    const userId: string = req.params.id;
+    const userId = req.params.id;
 
     const events: IEventWithMembersPurchaseReceiptsPopulated[] =
-      await Event.find({
-        members: userId,
-        state: "readyforpayment",
-      })
-        .populate({
-          path: "purchaseReceipts",
-          populate: [
-            { path: "shoppingDesignee", model: "User" },
-            { path: "participants", model: "User" },
-          ],
-        })
-        .populate({ path: "members", model: "User" });
-    const debtorEvents: mongoose.Types.ObjectId[] = [];
-    for (const event of events) {
-      const userBalances = assignEventValues(event.purchaseReceipts);
+      await findEventsAndPopulate<IEventWithMembersPurchaseReceiptsPopulated>(
+        {
+          members: userId,
+          state: EventState.readyForPayment,
+        },
+        [
+          {
+            path: "purchaseReceipts",
+            populate: [
+              { path: "shoppingDesignee", model: "User" },
+              { path: "participants", model: "User" },
+            ],
+          },
+          { path: "members", model: "User" },
+        ]
+      );
+    const debtorEvents: ObjectId[] = [];
+    for (const { _id, purchaseReceipts } of events) {
+      const userBalances = assignEventValues(purchaseReceipts);
       const transferInfo = calculateTransfersInfo(userBalances);
 
       const userTransfer = transferInfo.find(
@@ -82,76 +100,85 @@ export async function isDebtor(req: Request, res: Response): Promise<Response> {
       );
 
       if (userTransfer) {
-        const receipt: ITransferReceipt | null = await TransferReceipt.findOne({
-          event: event._id,
+        const receipt = await findOneTransferReceipt({
+          event: _id,
           user: userId,
         });
 
         if (!receipt || !receipt.hasPaid) {
-          debtorEvents.push(event._id);
+          debtorEvents.push(_id);
         }
       }
     }
     return res.status(STATUS_CODES.OK).json(debtorEvents);
-  } catch (error) {
+  } catch (error: any) {
     return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({
       message: error?.message || "Internal server error.",
     });
   }
 }
 
-export async function hasPendingTransfers(req: Request, res: Response) {
+export async function hasPendingTransfers(
+  req: Request<{ id: string }>,
+  res: Response
+) {
   try {
-    const shoppingDesigneeId: mongoose.Types.ObjectId = new mongoose.Types.ObjectId(req.params.id);
-    const events: IEventAmountCalculationsWithTransfers[] = await Event.find({
-      shoppingDesignee: shoppingDesigneeId,
-      state: "readyforpayment",
-    })
-      .select("purchaseReceipts members")
-      .populate([
+    const shoppingDesigneeId = createObjectId(req.params.id);
+    const events =
+      await findEventsAndPopulate<IEventAmountCalculationsWithTransfers>(
         {
-          path: "purchaseReceipts",
-          populate: [
-            {
-              path: "shoppingDesignee",
-              model: "User",
-            },
-            {
-              path: "participants",
-              model: "User",
-            },
-          ],
+          shoppingDesignee: shoppingDesigneeId,
+          state: EventState.readyForPayment,
         },
-        {
-          path: "members",
-          model: "User",
-        },
-        {
-          path: "transferReceipts",
-          model: "TransferReceipt",
-        }
-      ]);
-    const debtorEvents: mongoose.Types.ObjectId[] = [];
-    for (const event of events) {
-      for (const receipt of event.transferReceipts) {
-        if (!receipt.hasPaid && shoppingDesigneeId.equals(receipt.receiver)) {
-          debtorEvents.push(event._id);
+        [
+          {
+            path: "purchaseReceipts",
+            populate: [
+              {
+                path: "shoppingDesignee",
+                model: "User",
+              },
+              {
+                path: "participants",
+                model: "User",
+              },
+            ],
+          },
+          {
+            path: "members",
+            model: "User",
+          },
+          {
+            path: "transferReceipts",
+            model: "TransferReceipt",
+          },
+        ],
+        "purchaseReceipts members"
+      );
+    const debtorEvents: ObjectId[] = [];
+    for (const { _id, transferReceipts } of events) {
+      for (const { hasPaid, receiver } of transferReceipts) {
+        if (!hasPaid && receiver && shoppingDesigneeId.equals(receiver)) {
+          debtorEvents.push(_id);
           break;
         }
       }
     }
     return res.status(STATUS_CODES.OK).json(debtorEvents);
-  } catch (error) {
+  } catch (error: any) {
     return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({
       message: error?.message || "Internal server error.",
     });
   }
 }
 
-export async function register(req: Request, res: Response): Promise<Response> {
+export async function register(
+  req: Request<any, any, { email: string; password: string }>,
+  res: Response
+): Promise<Response> {
   try {
     req.body.email = req.body.email.toLowerCase();
-    const existingUser: IUser = await User.findOne({ email: req.body.email });
+    const existingUser = await findOneUser<IUser>({ email: req.body.email });
     if (existingUser)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
@@ -165,47 +192,77 @@ export async function register(req: Request, res: Response): Promise<Response> {
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Password doesn't match the requirements." });
     }
+
     let user: IUser = new User(req.body);
-    const salt: string = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(user.password, salt);
+    const salt = await genSalt(10);
+    user.password = await hash(user.password, salt);
     user = await user.save();
     return res.status(STATUS_CODES.CREATED).json(user);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
   }
 }
 
-export async function editUser(req: Request, res: Response): Promise<Response> {
+export async function editUser(
+  req: Request<
+    { id: string },
+    any,
+    {
+      name?: string;
+      lastName?: string;
+      alternativeEmail?: string;
+      specialDiet: string[];
+      alias?: string;
+      cbu?: string;
+      notifications?: {
+        newEvent?: boolean;
+        eventStart?: boolean;
+        penalizationStart?: boolean;
+        penalizationOneWeek?: boolean;
+      };
+    }
+  >,
+  res: Response
+): Promise<Response> {
   try {
-    let user: IUser | null = await User.findById(req.params.id);
+    let user = await findUserById<IUser>(req.params.id);
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: userNotFoundMessage });
-    user.name = req.body.name ? req.body.name : user.name;
-    user.lastName = req.body.lastName ? req.body.lastName : user.lastName;
-    user.alternativeEmail = req.body.alternativeEmail
-      ? req.body.alternativeEmail.toLowerCase()
+
+    const {
+      name,
+      lastName,
+      alternativeEmail,
+      specialDiet,
+      alias,
+      cbu,
+      notifications,
+    } = req.body;
+    user.name = name || user.name;
+    user.lastName = lastName || user.lastName;
+    user.alternativeEmail = alternativeEmail
+      ? alternativeEmail.toLowerCase()
       : null;
-    user.specialDiet = req.body.specialDiet;
-    user.alias = req.body.alias;
-    user.cbu = req.body.cbu;
+    user.specialDiet = specialDiet;
+    user.alias = alias;
+    user.cbu = cbu;
     user.notifications = {
-      newEvent: req.body.notifications?.newEvent ?? user.notifications.newEvent,
-      eventStart:
-        req.body.notifications?.eventStart ?? user.notifications.eventStart,
+      newEvent: notifications?.newEvent ?? user.notifications.newEvent,
+      eventStart: notifications?.eventStart ?? user.notifications.eventStart,
       penalizationStart:
-        req.body.notifications?.penalizationStart ??
+        notifications?.penalizationStart ??
         user.notifications.penalizationStart,
       penalizationOneWeek:
-        req.body.notifications?.penalizationOneWeek ??
+        notifications?.penalizationOneWeek ??
         user.notifications.penalizationOneWeek,
     };
     user = await user.save();
     return res.status(STATUS_CODES.OK).json(user);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -213,27 +270,31 @@ export async function editUser(req: Request, res: Response): Promise<Response> {
 }
 
 export async function editProfilePicture(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
     if (req.file) {
-      let user: IUser | null = await User.findById(req.params.id);
+      let user = await findUserById<IUser>(req.params.id);
       if (!user)
         return res
           .status(STATUS_CODES.NOT_FOUND)
           .json({ message: userNotFoundMessage });
+
       if (user.profilePicture) {
-        const deletedImage: IImage | null = await Image.findOneAndDelete(
-          user.profilePicture
-        );
+        await findOneImageAndDelete(user.profilePicture);
       }
-      const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+
+      const imageId = await saveImage(req.file);
       user.profilePicture = imageId;
       user = await user.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
+      return res.status(STATUS_CODES.OK).json({ imageId });
+    } else {
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "No file provided",
+      });
     }
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });
@@ -241,17 +302,17 @@ export async function editProfilePicture(
 }
 
 export async function deleteUser(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response
 ): Promise<Response> {
   try {
-    const user: IUser | null = await User.findByIdAndRemove(req.params.id);
+    const user = await findUserByIdAndRemove(req.params.id);
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: userNotFoundMessage });
     return res.status(STATUS_CODES.OK).json(user);
-  } catch (error) {
+  } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error." });

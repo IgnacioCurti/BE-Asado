@@ -1,35 +1,41 @@
 import { Request, Response } from "express";
-import { sendEmail } from "../utils/utils.js";
-import { Event } from "../models/event.js";
-import { User } from "../models/user.js";
-import { Reminder } from "../models/reminder.js";
-import { getEventsDebtors } from "../utils/utils.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { sendEmail } from "../utils/utils";
+import { STATUS_CODES } from "../constants/httpStatusCode";
 import {
   eventStartTemplate,
   newEventTemplate,
   penalizationStartTemplate,
   penalizationOneWeekTemplate,
-} from "../utils/templates.js";
+} from "../utils/templates";
+import { IUser, IEventWithMembers, IReminder } from "../models/interfaces";
+import { find as findUsers } from "../repositories/usersRepository";
 import {
-  IUser,
-  IEventWithMembers,
-  IEvent,
-  IReminder,
-} from "../models/interfaces.js";
+  findById,
+  findByIdAndPopulate,
+  getEventsDebtors,
+} from "../repositories/eventsRepository";
+import {
+  findByIdAndDelete as findReminderByIdAndDelete,
+  find as findReminders,
+  ReminderType,
+} from "../repositories/remindersRepository";
 
 export async function notifyNewEvent(eventId: string): Promise<void> {
   try {
-    const users: IUser[] = await User.find({ "notifications.newEvent": true });
-    const message: string = newEventTemplate(eventId);
+    const users = await findUsers<IUser>({ "notifications.newEvent": true });
+    const message = newEventTemplate(eventId);
 
     for (const user of users) {
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
-      await sendEmail(email, "FoodSpot | Nuevo evento", user.name, message);
+      const { alternativeEmail, email, name } = user;
+      const destinationEmail = alternativeEmail || email;
+      await sendEmail(
+        destinationEmail,
+        "FoodSpot | Nuevo evento",
+        name,
+        message
+      );
       console.log(
-        `Notification sent to ${user.name} (${email}) for new event ${eventId}`
+        `Notification sent to ${name} (${destinationEmail}) for new event ${eventId}`
       );
     }
   } catch (error: any) {
@@ -39,27 +45,31 @@ export async function notifyNewEvent(eventId: string): Promise<void> {
 
 export async function notifyEventStart(eventId: string): Promise<void> {
   try {
-    const event: IEventWithMembers | null = await Event.findById(
-      eventId
-    ).populate("members");
+    const event = await findByIdAndPopulate<IEventWithMembers>(eventId, [
+      "members",
+    ]);
 
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
     }
-    const message: string = eventStartTemplate(eventId);
-    for (const user of event.members) {
-      if (!user.notifications.eventStart) continue;
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
+
+    const message = eventStartTemplate(eventId);
+    for (const {
+      alternativeEmail,
+      email,
+      name,
+      notifications: { eventStart },
+    } of event.members) {
+      if (!eventStart) continue;
+      const destinationEmail = alternativeEmail || email;
       await sendEmail(
         email,
         "FoodSpot | Tu evento comienza pronto",
-        user.name,
+        name,
         message
       );
       console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} start`
+        `Notification sent to ${name} (${destinationEmail}) for event ${eventId} start`
       );
     }
   } catch (error: any) {
@@ -69,28 +79,34 @@ export async function notifyEventStart(eventId: string): Promise<void> {
 
 export async function notifyPenalizationStart(eventId: string): Promise<void> {
   try {
-    const event: IEvent | null = await Event.findById(eventId);
+    const event = await findById(eventId);
 
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
     }
 
     const debtors = await getEventsDebtors(eventId);
-    const message = penalizationStartTemplate(eventId, event.penalization);
-    for (const user of debtors) {
-      if (!user.notifications.penalizationStart) continue;
-      const email = user.alternativeEmail ? user.alternativeEmail : user.email;
+    const message = penalizationStartTemplate(eventId, event.penalization ?? 0);
+    for (const {
+      alternativeEmail,
+      email,
+      name,
+      notifications: { penalizationStart },
+    } of debtors) {
+      if (!penalizationStart) continue;
+
+      const destinationEmail = alternativeEmail || email;
       await sendEmail(
-        email,
+        destinationEmail,
         "FoodSpot | La penalización está por empezar",
-        user.name,
+        name,
         message
       );
       console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} penalization start`
+        `Notification sent to ${name} (${destinationEmail}) for event ${eventId} penalization start`
       );
     }
-  } catch (error) {
+  } catch (error: any) {
     console.log(error?.message || "Error notifying penalization start");
   }
 }
@@ -99,31 +115,34 @@ export async function notifyPenalizationOneWeek(
   eventId: string
 ): Promise<void> {
   try {
-    const event: IEvent | null = await Event.findById(eventId);
+    const event = await findById(eventId);
 
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
     }
 
-    const debtors: IUser[] = await getEventsDebtors(eventId);
-    const message: string = penalizationOneWeekTemplate(
+    const debtors = await getEventsDebtors(eventId);
+    const message = penalizationOneWeekTemplate(
       eventId,
-      event.penalization
+      event.penalization ?? 0
     );
 
-    for (const user of debtors) {
-      if (!user.notifications.penalizationOneWeek) continue;
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
+    for (const {
+      alternativeEmail,
+      email,
+      name,
+      notifications: { penalizationOneWeek },
+    } of debtors) {
+      if (!penalizationOneWeek) continue;
+      const destinationEmail = alternativeEmail || email;
       await sendEmail(
-        email,
+        destinationEmail,
         "FoodSpot | La penalización ha estado en curso durante una semana",
-        user.name,
+        name,
         message
       );
       console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} penalization one week`
+        `Notification sent to ${name} (${destinationEmail}) for event ${eventId} penalization one week`
       );
     }
   } catch (error: any) {
@@ -136,27 +155,27 @@ export async function reminderCheck(
   res: Response
 ): Promise<Response> {
   try {
-    const date: Date = new Date();
+    const date = new Date();
     date.setHours(date.getHours() - 3);
-    const reminders: IReminder[] = await Reminder.find({
+    const reminders = await findReminders<IReminder>({
       datetime: { $lte: date },
     });
-    for (const reminder of reminders) {
-      const eventId: string = reminder.event.toString();
-      switch (reminder.type) {
-        case "eventStart":
+    for (const { _id, event, type } of reminders) {
+      const eventId = event.toString();
+      switch (type) {
+        case ReminderType.eventStart:
           await notifyEventStart(eventId);
           console.log(
             `Notification sent for event start reminder for event ${eventId}`
           );
           break;
-        case "penalizationStart":
+        case ReminderType.penalizationStart:
           await notifyPenalizationStart(eventId);
           console.log(
             `Notification sent for penalization start reminder for event ${eventId}`
           );
           break;
-        case "penalizationOneWeek":
+        case ReminderType.penalizationOneWeek:
           await notifyPenalizationOneWeek(eventId);
           console.log(
             `Notification sent for penalization one week reminder for event ${eventId}`
@@ -165,7 +184,7 @@ export async function reminderCheck(
         default:
           break;
       }
-      await Reminder.findByIdAndDelete(reminder._id);
+      await findReminderByIdAndDelete(_id);
     }
     return res.status(STATUS_CODES.OK).json({ data: reminders });
   } catch (error: any) {

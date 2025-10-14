@@ -1,7 +1,7 @@
-import express from "express";
-import cors from "cors";
-import { connectDB } from "./connection/connection.js";
-import router from "./router.js";
+import express = require("express");
+import cors = require("cors");
+import { connectDB } from "./connection/connection";
+import router from "./router";
 
 const app: express.Application = express();
 

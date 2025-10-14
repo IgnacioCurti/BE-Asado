@@ -1,8 +1,8 @@
-import express from "express";
-import { getImage } from "../controllers/images.js";
-import { auth } from "../middleware/middleware.js";
+import { Router } from "express";
+import { getImage } from "../controllers/images";
+import { auth } from "../middleware/middleware";
 
-const imageRouter: express.Router = express.Router();
+const imageRouter = Router();
 
 imageRouter.get("/getImage/:id", auth, getImage);
 

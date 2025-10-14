@@ -1,17 +1,7 @@
 import mongoose from "mongoose";
-import { brevo } from "../config.js";
-import https from "https";
-import {
-  IEventAmountCalculationsWithTransfers,
-  ITransferInfo,
-  IUser,
-  IUserBalance,
-} from "../models/interfaces.js";
-import { Event } from "../models/event.js";
-import {
-  assignEventValues,
-  calculateTransfersInfo,
-} from "../controllers/events.js";
+import { brevo } from "../config";
+import { request } from "https";
+import { createObjectId } from "../repositories/utils/mongoose";
 
 function sendEmail(
   email: string,
@@ -42,7 +32,7 @@ function sendEmail(
   };
 
   return new Promise((resolve, reject) => {
-    const req = https.request(brevo.url, options, (res) => {
+    const req = request(brevo.url, options, (res: any) => {
       res.on("data", () => {});
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -60,70 +50,11 @@ function sendEmail(
 
 function isValidId(id: string): boolean {
   if (mongoose.Types.ObjectId.isValid(id)) {
-    if (String(new mongoose.Types.ObjectId(id)) == id) {
+    if (String(createObjectId(id)) == id) {
       return true;
     }
   }
   return false;
 }
 
-async function getEventsDebtors(eventId: string): Promise<IUser[]> {
-  const event: IEventAmountCalculationsWithTransfers | null =
-    await Event.findById(eventId).populate([
-      {
-        path: "purchaseReceipts",
-        populate: [
-          {
-            path: "shoppingDesignee",
-            model: "User",
-          },
-          {
-            path: "participants",
-            model: "User",
-          },
-        ],
-      },
-      {
-        path: "members",
-        model: "User",
-      },
-      {
-        path: "transferReceipts",
-        populate: {
-          path: "user",
-          model: "User",
-        },
-      },
-    ]);
-
-  if (!event) {
-    throw new Error(`Event with ID ${eventId} not found.`);
-  }
-
-  const userBalances: IUserBalance[] = assignEventValues(
-    event.purchaseReceipts
-  );
-  const transferInfo: ITransferInfo[] = calculateTransfersInfo(userBalances);
-  const expectedTransfers: ITransferInfo[] = transferInfo.filter(
-    (t) => t.receiver !== null
-  );
-
-  const debtorUsers: (IUser | null)[] = await Promise.all(
-    expectedTransfers.map(async (transfer) => {
-      const receipt = event.transferReceipts.find((r) =>
-        r.user._id.equals(transfer.userId)
-      );
-      if (!receipt) {
-        return receipt.user;
-      }
-      return null;
-    })
-  );
-
-  const debtors: IUser[] = debtorUsers.filter(
-    (user): user is IUser => user !== null
-  );
-  return debtors;
-}
-
-export { isValidId, sendEmail, getEventsDebtors };
+export { isValidId, sendEmail };

@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
-import { IEvent } from "./interfaces.js";
+import { IEvent } from "./interfaces";
+import { EventState } from "../repositories/eventsRepository";
 
 const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
   title: { type: String, required: true },
@@ -13,15 +14,15 @@ const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
   state: {
     type: String,
     required: true,
-    default: "available",
+    default: EventState.available,
     validate: {
       validator: function (v: string): boolean {
         const valid_states: string[] = [
-          "closed",
-          "available",
-          "readyforpayment",
-          "cancelled",
-          "finished",
+          EventState.closed,
+          EventState.available,
+          EventState.readyForPayment,
+          EventState.cancelled,
+          EventState.finished,
         ];
         if (!v) return false;
         if (!valid_states.includes(v.toLowerCase())) {

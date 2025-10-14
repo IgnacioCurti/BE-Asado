@@ -1,20 +1,23 @@
-import bcrypt from "bcrypt";
+import { compare } from "bcrypt";
 import { Request, Response } from "express";
-import { User } from "../models/user.js";
-import { IUser } from "../models/interfaces.js";
-import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { IUser } from "../models/interfaces";
+import { STATUS_CODES } from "../constants/httpStatusCode";
+import { findOne } from "../repositories/usersRepository";
 
-export async function login(req: Request, res: Response): Promise<Response> {
+export async function login(
+  req: Request<any, any, { email: string; password: string }>,
+  res: Response
+): Promise<Response> {
   try {
     req.body.email = req.body.email.toLowerCase();
-    const existingUser: IUser | null = await User.findOne({
+    const existingUser = await findOne<IUser>({
       email: req.body.email,
     });
     if (!existingUser)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Invalid email or password" });
-    const validPassword: boolean = await bcrypt.compare(
+    const validPassword: boolean = await compare(
       req.body.password,
       existingUser.password
     );

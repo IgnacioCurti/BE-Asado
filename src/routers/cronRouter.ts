@@ -1,7 +1,7 @@
-import express from "express";
-import { reminderCheck } from "../controllers/notifications.js";
+import { Router } from "express";
+import { reminderCheck } from "../controllers/notifications";
 
-const cronRouter: express.Router = express.Router();
+const cronRouter = Router();
 
 cronRouter.get("/reminderCheck", reminderCheck);
 

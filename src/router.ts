@@ -1,16 +1,16 @@
-import express from "express";
-import eventRouter from "./routers/eventsRouter.js";
-import imageRouter from "./routers/imagesRouter.js";
-import signInRouter from "./routers/signInRouter.js";
-import purchaseReceiptRouter from "./routers/purchaseReceiptsRouter.js";
-import passwordRouter from "./routers/passwordsRouter.js";
-import transferReceiptRouter from "./routers/transferReceiptsRouter.js";
-import usersRouter from "./routers/usersRouter.js";
-import ratingsRouter from "./routers/ratingsRouter.js";
-import cronRouter from "./routers/cronRouter.js";
-import optionRouter from "./routers/optionsRouter.js";
+import { Router } from "express";
+import eventRouter from "./routers/eventsRouter";
+import imageRouter from "./routers/imagesRouter";
+import signInRouter from "./routers/signInRouter";
+import purchaseReceiptRouter from "./routers/purchaseReceiptsRouter";
+import passwordRouter from "./routers/passwordsRouter";
+import transferReceiptRouter from "./routers/transferReceiptsRouter";
+import usersRouter from "./routers/usersRouter";
+import ratingsRouter from "./routers/ratingsRouter";
+import cronRouter from "./routers/cronRouter";
+import optionRouter from "./routers/optionsRouter";
 
-const router: express.Router = express.Router();
+const router = Router();
 
 // events routes
 router.use("/events", eventRouter);

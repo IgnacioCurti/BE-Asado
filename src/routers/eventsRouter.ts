@@ -1,4 +1,4 @@
-import express from "express";
+import { Router } from "express";
 import {
   getEvents,
   getPublicEvents,
@@ -13,15 +13,15 @@ import {
   editRoles,
   editEvent,
   deleteEvent,
-} from "../controllers/events.js";
+} from "../controllers/events";
 import {
   auth,
   sameUser,
   eventOrganizer,
   shoppingDesigneeOrEventOrganizer,
-} from "../middleware/middleware.js";
+} from "../middleware/middleware";
 
-const eventRouter: express.Router = express.Router();
+const eventRouter = Router();
 
 eventRouter.get("/getEvents", auth, getEvents);
 

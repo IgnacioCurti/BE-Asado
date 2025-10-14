@@ -1,8 +1,8 @@
-import express from "express";
-import { createRating, getRatingFromUser } from "../controllers/ratings.js";
-import { auth } from "../middleware/middleware.js";
+import { Router } from "express";
+import { createRating, getRatingFromUser } from "../controllers/ratings";
+import { auth } from "../middleware/middleware";
 
-const ratingsRouter: express.Router = express.Router();
+const ratingsRouter = Router();
 
 ratingsRouter.post("/createRating/:event/:user", [auth], createRating);
 

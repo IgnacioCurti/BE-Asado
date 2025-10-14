@@ -1,5 +1,5 @@
 import mongoose, { Model } from "mongoose";
-import { IOption } from "./interfaces.js";
+import { IOption } from "./interfaces";
 
 const optionSchema: mongoose.Schema = new mongoose.Schema<IOption>({
   title: { type: String },
