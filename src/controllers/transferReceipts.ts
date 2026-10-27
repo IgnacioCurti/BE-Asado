@@ -202,7 +202,7 @@ export async function deleteTransferReceipt(
 ): Promise<Response> {
   try {
     const transferReceipt: ITransferReceipt | null =
-      await TransferReceipt.findByIdAndDelete(req.params.id);
+      await TransferReceipt.findById(req.params.id);
     if (!transferReceipt)
       return res.status(STATUS_CODES.NOT_FOUND).json({
         message: transferReceiptNotFoundMessage,
@@ -213,6 +213,7 @@ export async function deleteTransferReceipt(
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: cannotCreateTransferReceiptMessage,
       });
+    await TransferReceipt.findByIdAndDelete(transferReceipt._id);
     const index: number = event.transferReceipts.indexOf(transferReceipt._id);
     event.transferReceipts.splice(index, 1);
     await event.save();
