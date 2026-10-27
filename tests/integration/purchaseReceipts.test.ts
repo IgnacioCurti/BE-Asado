@@ -140,6 +140,27 @@ describe("POST /api/purchaseReceipts/createPurchaseReceipt/:event", () => {
     expect(res.body.participants).toEqual([member._id]);
   });
 
+  it("un participante que no es miembro del evento -> 400 y no crea nada", async () => {
+    const { designee, member, outsider, event } = await closedEventWithDesignee();
+    const res = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(designee.token))
+      .send({ description: "Bebidas", amount: 500, participants: [member._id, outsider._id] });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "All participants must be members of the event." });
+    expect(await countPurchaseReceipts()).toBe(0);
+  });
+
+  it("ignora image y otros campos del body", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const res = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(designee.token))
+      .send({ description: "Carne", amount: 100, image: newId() });
+    expect(res.status).toBe(201);
+    expect(res.body.image).toBeNull();
+  });
+
   it("[comportamiento actual] una lista vacía de participantes se respeta (no usa los miembros)", async () => {
     const { designee, event } = await closedEventWithDesignee();
     const res = await api()

@@ -116,14 +116,25 @@ export async function createPurchaseReceipt(
         message:
           "Purchase receipts can only be uploaded when the event is closed",
       });
-    let purchaseReceipt: IPurchaseReceipt = new PurchaseReceipt(req.body);
+    const participants: unknown[] = req.body.participants ?? event.members;
+    const allMembers: boolean =
+      Array.isArray(participants) &&
+      participants.every((participant) =>
+        event.members.some((member) => member.equals(String(participant)))
+      );
+    if (!allMembers)
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "All participants must be members of the event.",
+      });
+    let purchaseReceipt: IPurchaseReceipt = new PurchaseReceipt({
+      description: req.body.description,
+      amount: req.body.amount,
+    });
     purchaseReceipt.event = event._id;
     purchaseReceipt.shoppingDesignee = new mongoose.Types.ObjectId(
       req.user._id
     );
-    purchaseReceipt.participants = req.body.participants
-      ? req.body.participants
-      : event.members;
+    purchaseReceipt.participants = participants as mongoose.Types.ObjectId[];
     purchaseReceipt = await purchaseReceipt.save();
     event.purchaseReceipts.push(purchaseReceipt._id);
     await event.save();
