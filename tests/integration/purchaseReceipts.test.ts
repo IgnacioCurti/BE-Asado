@@ -291,7 +291,7 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
     expect(await countImages()).toBe(2);
   });
 
-  it("[comportamiento actual] comprobante inexistente -> 404, pero la imagen queda guardada", async () => {
+  it("comprobante inexistente -> 404 y no guarda la imagen", async () => {
     const user = await createUser();
     const res = await api()
       .post(`/api/purchaseReceipts/uploadFile/${newId()}`)
@@ -299,7 +299,19 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
       .attach("file", PNG_BYTES, { filename: "n.png", contentType: "image/png" });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "The purchase receipt with the given ID was not found." });
-    expect(await countImages()).toBe(1);
+    expect(await countImages()).toBe(0);
+  });
+
+  it("quien no es comprador del evento -> 403", async () => {
+    const { designee, member, event } = await closedEventWithDesignee();
+    const receipt = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [] });
+    const res = await api()
+      .post(`/api/purchaseReceipts/uploadFile/${receipt._id}`)
+      .set(auth(member.token))
+      .attach("file", PNG_BYTES, { filename: "n.png", contentType: "image/png" });
+    expect(res.status).toBe(403);
+    expect((await findPurchaseReceipt(receipt._id))!.image).toBeNull();
+    expect(await countImages()).toBe(0);
   });
 
   it("[comportamiento actual] tipo de archivo no permitido -> 500", async () => {
