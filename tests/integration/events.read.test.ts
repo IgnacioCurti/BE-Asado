@@ -431,11 +431,35 @@ describe("GET /api/events/getMemberIndividualCost/:user/:event", () => {
     expect(caroTransfer.amount).toBe(cost.body.userAmount);
   });
 
-  it("cualquier usuario autenticado puede consultar el costo de otro", async () => {
+  it("cada miembro puede consultar su propio costo", async () => {
+    const { caro, event } = await scenario("finished");
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(caro.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("un miembro que no es organizador ni comprador no puede ver el costo de otro -> 403", async () => {
+    const { beto, caro, event } = await scenario("finished");
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(beto.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("un comprador puede ver el costo de otro miembro", async () => {
+    const { ana, beto, caro } = await scenario("finished");
+    const event = await createEvent({
+      organizer: ana._id,
+      members: [ana._id, beto._id, caro._id],
+      shoppingDesignee: [beto._id],
+      state: "finished",
+    });
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(beto.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("un usuario ajeno al evento -> 403", async () => {
     const { caro, event } = await scenario("finished");
     const stranger = await createUser();
     const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(stranger.token));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   it("sin comprobantes devuelve 0", async () => {

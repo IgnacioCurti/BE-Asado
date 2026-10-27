@@ -32,8 +32,8 @@ const routes: [string, string, boolean][] = [
   ["delete", `/api/transferReceipts/deleteTransferReceipt/${ID}`, true],
   ["get", "/api/users/getUsers", true],
   ["get", `/api/users/getUserById/${ID}`, true],
-  ["get", `/api/users/isDebtor/${ID}`, true],
-  ["get", `/api/users/hasPendingTransfers/${ID}`, true],
+  ["get", "/api/users/isDebtor/:me", true],
+  ["get", "/api/users/hasPendingTransfers/:me", true],
   ["get", "/api/cron/reminderCheck", false],
 ];
 
@@ -41,7 +41,7 @@ describe("Falla de base de datos", () => {
   it.each(routes)("%s %s -> 500 con el mensaje del error", async (method, path, needsAuth) => {
     const user = await createUser();
     simulateDatabaseFailure("DB caída");
-    let req = (api() as any)[method](path);
+    let req = (api() as any)[method](path.replace(":me", user._id));
     if (needsAuth) req = req.set(auth(user.token));
     const res = await req.send({});
     expect(res.status).toBe(500);
