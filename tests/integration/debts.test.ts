@@ -60,16 +60,15 @@ describe("GET /api/users/isDebtor/:id", () => {
     expect(res.body.sort()).toEqual([first.event._id, second._id].sort());
   });
 
-  it("[comportamiento actual] cualquier usuario autenticado puede consultar a otro", async () => {
-    const { beto, event } = await scenario();
-    const stranger = await createUser();
-    const res = await api().get(`/api/users/isDebtor/${beto._id}`).set(auth(stranger.token));
-    expect(res.body).toEqual([event._id]);
+  it("consultar a otro usuario -> 403, aunque sea el organizador del evento", async () => {
+    const { ana, beto } = await scenario();
+    const res = await api().get(`/api/users/isDebtor/${beto._id}`).set(auth(ana.token));
+    expect(res.status).toBe(403);
   });
 
-  it("[comportamiento actual] id mal formado -> 500", async () => {
+  it("id mal formado -> 400", async () => {
     const user = await createUser();
-    expect((await api().get("/api/users/isDebtor/abc").set(auth(user.token))).status).toBe(500);
+    expect((await api().get("/api/users/isDebtor/abc").set(auth(user.token))).status).toBe(400);
   });
 });
 
@@ -110,8 +109,14 @@ describe("GET /api/users/hasPendingTransfers/:id", () => {
     expect((await api().get(`/api/users/hasPendingTransfers/${other.beto._id}`).set(auth(other.beto.token))).body).toEqual([]);
   });
 
-  it("[comportamiento actual] id mal formado -> 500", async () => {
+  it("consultar a otro usuario -> 403", async () => {
+    const { ana, beto } = await scenario();
+    const res = await api().get(`/api/users/hasPendingTransfers/${ana._id}`).set(auth(beto.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("id mal formado -> 400", async () => {
     const user = await createUser();
-    expect((await api().get("/api/users/hasPendingTransfers/abc").set(auth(user.token))).status).toBe(500);
+    expect((await api().get("/api/users/hasPendingTransfers/abc").set(auth(user.token))).status).toBe(400);
   });
 });

@@ -716,7 +716,7 @@ export async function getMembersAmount(
 }
 
 export async function getMemberIndividualCost(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
@@ -735,6 +735,14 @@ export async function getMemberIndividualCost(
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
+    const canSeeOthers: boolean =
+      event.organizer.toString() === req.user._id ||
+      event.shoppingDesignee.some((id) => id.toString() === req.user._id);
+    if (req.params.user !== req.user._id && !canSeeOthers)
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message:
+          "Access denied. Only the event's organizer or shopping designees can see other members' costs.",
+      });
     if (!event.members.includes(new mongoose.Types.ObjectId(req.params.user)))
       return res
         .status(STATUS_CODES.FORBIDDEN)
