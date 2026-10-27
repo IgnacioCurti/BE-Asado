@@ -160,24 +160,36 @@ export async function getMembersAndReceiptsInfo(
   }
 }
 
+// A missing reminder was either never needed or already sent (reminderCheck
+// deletes them), so only create the ones that are still due in the future.
+async function upsertReminder(
+  reminders: IReminder[],
+  event: IEvent,
+  type: IReminder["type"],
+  datetime: Date
+): Promise<void> {
+  const existing: IReminder | undefined = reminders.find(
+    (reminder) => reminder.type === type
+  );
+  if (existing) {
+    existing.datetime = datetime;
+    await existing.save();
+    return;
+  }
+  const now: Date = new Date();
+  now.setHours(now.getHours() - 3);
+  if (datetime <= now) return;
+  await new Reminder({ event: event._id, type, datetime }).save();
+}
+
 async function updateReminders(event: IEvent): Promise<void> {
   const reminders: IReminder[] = await Reminder.find({ event: event._id });
-  const eventStartReminder: IReminder | undefined = reminders.find(
-    (reminder) => reminder.type === "eventStart"
+  await upsertReminder(
+    reminders,
+    event,
+    "eventStart",
+    new Date(event.datetime.getTime() - 30 * 60 * 1000)
   );
-  if (eventStartReminder) {
-    eventStartReminder.datetime = new Date(
-      event.datetime.getTime() - 30 * 60 * 1000
-    );
-    await eventStartReminder.save();
-  } else {
-    const newEventStartReminder: IReminder = new Reminder({
-      event: event._id,
-      type: "eventStart",
-      datetime: new Date(event.datetime.getTime() - 30 * 60 * 1000),
-    });
-    await newEventStartReminder.save();
-  }
 
   if (event.penalizationStartDate && event.penalization > 0) {
     const penalizationReminderDate: Date = new Date(
@@ -185,40 +197,18 @@ async function updateReminders(event: IEvent): Promise<void> {
     );
     penalizationReminderDate.setDate(penalizationReminderDate.getDate() - 1);
     penalizationReminderDate.setHours(20, 0, 0, 0); // 8 PM the day before penalization starts
-
-    const penalizationStartReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationStart"
+    await upsertReminder(
+      reminders,
+      event,
+      "penalizationStart",
+      penalizationReminderDate
     );
-
-    if (penalizationStartReminder) {
-      penalizationStartReminder.datetime = penalizationReminderDate;
-      await penalizationStartReminder.save();
-    } else {
-      const newPenalizationStartReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationStart",
-        datetime: penalizationReminderDate,
-      });
-      await newPenalizationStartReminder.save();
-    }
-
-    const penalizationOneWeekReminderDate: Date = new Date(
-      penalizationReminderDate.getTime() + 7 * 24 * 60 * 60 * 1000
+    await upsertReminder(
+      reminders,
+      event,
+      "penalizationOneWeek",
+      new Date(penalizationReminderDate.getTime() + 7 * 24 * 60 * 60 * 1000)
     );
-    const penalizationOneWeekReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationOneWeek"
-    );
-    if (penalizationOneWeekReminder) {
-      penalizationOneWeekReminder.datetime = penalizationOneWeekReminderDate;
-      await penalizationOneWeekReminder.save();
-    } else {
-      const newPenalizationOneWeekReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationOneWeek",
-        datetime: penalizationOneWeekReminderDate,
-      });
-      await newPenalizationOneWeekReminder.save();
-    }
   }
 }
 
