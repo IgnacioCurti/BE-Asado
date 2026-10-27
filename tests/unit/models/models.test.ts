@@ -219,11 +219,11 @@ describe("Rating schema", () => {
 });
 
 describe("Reminder schema", () => {
-  it.each(["eventStart", "penalizationStart", "penalizationOneWeek"])("acepta el tipo %s", (type) => {
+  it.each(["newEvent", "eventStart", "penalizationStart", "penalizationOneWeek"])("acepta el tipo %s", (type) => {
     expect(errorsOf(new Reminder({ event: oid(), datetime: new Date(), type }))).toEqual([]);
   });
 
-  it.each(["eventstart", "newEvent", ""])("rechaza el tipo %j (sensible a mayúsculas)", (type) => {
+  it.each(["eventstart", "newevent", ""])("rechaza el tipo %j (sensible a mayúsculas)", (type) => {
     expect(errorsOf(new Reminder({ event: oid(), datetime: new Date(), type }))).toEqual(["type"]);
   });
 

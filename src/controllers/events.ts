@@ -10,7 +10,6 @@ import { Reminder } from "../models/reminder.js";
 import { membersWhoHaveUploaded } from "./transferReceipts.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { nowArgentina } from "../utils/dates.js";
-import { notifyNewEvent } from "./notifications.js";
 import {
   IEvent,
   IEventAmountCalculations,
@@ -251,7 +250,13 @@ export async function createEvent(
     event = await event.save();
     await deleteEvents();
     if (!event.isPrivate) {
-      await notifyNewEvent(event.id);
+      // Sent by the next reminderCheck run, so creating the event doesn't
+      // wait for one email per subscribed user.
+      await new Reminder({
+        event: event._id,
+        type: "newEvent",
+        datetime: nowArgentina(),
+      }).save();
     }
     await updateReminders(event);
     return res.status(STATUS_CODES.CREATED).json(event);

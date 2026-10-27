@@ -23,6 +23,7 @@ import {
   findReminders,
   newId,
   remindersByType,
+  updateEvent,
   UserFixture,
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
@@ -169,11 +170,23 @@ describe("POST /api/events/createEvent", () => {
   describe("recordatorios", () => {
     it("crea un recordatorio eventStart 30 minutos antes del evento", async () => {
       const organizer = await createUser();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
       const reminders = await findReminders(res.body._id);
       expect(reminders).toEqual([
         expect.objectContaining({ type: "eventStart", datetime: "2030-01-10T20:30:00.000Z", event: res.body._id }),
       ]);
+    });
+
+    it("un evento público crea además un recordatorio newEvent con fecha = ahora - 3 horas", async () => {
+      const organizer = await createUser();
+      const before = Date.now();
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const after = Date.now();
+      const newEvent = (await remindersByType(res.body._id)).newEvent;
+      expect(newEvent).toHaveLength(1);
+      const datetime = new Date(newEvent![0].datetime).getTime();
+      expect(datetime).toBeGreaterThanOrEqual(before - 3 * 60 * 60 * 1000 - 1000);
+      expect(datetime).toBeLessThanOrEqual(after - 3 * 60 * 60 * 1000 + 1000);
     });
 
     it("con penalización crea además penalizationStart (20:00 del día anterior) y penalizationOneWeek (+7 días)", async () => {
@@ -198,12 +211,20 @@ describe("POST /api/events/createEvent", () => {
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
         .send(eventBody(organizer, { penalization: 100 }));
-      expect(Object.keys(await remindersByType(a.body._id))).toEqual(["eventStart"]);
-      expect(Object.keys(await remindersByType(b.body._id))).toEqual(["eventStart"]);
+      expect(Object.keys(await remindersByType(a.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
+      expect(Object.keys(await remindersByType(b.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
     });
   });
 
   describe("notificación de nuevo evento", () => {
+    it("crear el evento no manda mails: los manda el siguiente reminderCheck", async () => {
+      const organizer = await createUser();
+      await createUser({ notifications: { newEvent: true } as any });
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      expect(res.status).toBe(201);
+      expect(sentEmails).toHaveLength(0);
+    });
+
     it("un evento público notifica por mail a los usuarios con notifications.newEvent", async () => {
       const organizer = await createUser();
       const wantsIt = await createUser({ name: "Quiere", notifications: { newEvent: true } as any });
@@ -211,6 +232,7 @@ describe("POST /api/events/createEvent", () => {
       await createUser({ notifications: { newEvent: false } as any });
 
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
@@ -227,20 +249,35 @@ describe("POST /api/events/createEvent", () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
       await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
+      await api().get("/api/cron/reminderCheck").expect(200);
       expect(sentEmails).toHaveLength(0);
     });
 
-    it("si el envío de mails falla, el evento se crea igual (201) y se intenta notificar a todos", async () => {
+    it("si el evento pasa a privado o se cancela antes del cron, no notifica", async () => {
+      const organizer = await createUser();
+      await createUser({ notifications: { newEvent: true } as any });
+      const a = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const b = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await updateEvent(a.body._id, { isPrivate: true });
+      await updateEvent(b.body._id, { state: "cancelled" });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
+    });
+
+    it("si el envío de mails falla, se intenta notificar a todos y el recordatorio se consume", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: true } as any });
       setBrevoResponseStatus(500);
 
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
       expect(sentEmails).toHaveLength(2);
-      expect(await findReminders(res.body._id)).toHaveLength(1);
+      expect(Object.keys(await remindersByType(res.body._id))).toEqual(["eventStart"]);
     });
   });
 
@@ -934,6 +971,7 @@ describe("PUT /api/events/editEvent/:id", () => {
       .expect(200);
     expect(Object.keys(await remindersByType(created.body._id)).sort()).toEqual([
       "eventStart",
+      "newEvent",
       "penalizationOneWeek",
       "penalizationStart",
     ]);
