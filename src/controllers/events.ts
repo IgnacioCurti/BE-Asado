@@ -39,7 +39,7 @@ export async function getEvents(
   try {
     const events: IEvent[] = await Event.find().sort({
       datetime: -1,
-      ":id": 1,
+      _id: 1,
     });
     return res.json(events);
   } catch (error: any) {
