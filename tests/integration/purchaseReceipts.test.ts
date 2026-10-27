@@ -312,6 +312,18 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
     expect(await countImages()).toBe(2);
   });
 
+  it("[comportamiento actual] un archivo de más de 5 MB se rechaza (500 de multer) y no se guarda", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const receipt = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [] });
+    const big = Buffer.concat([PNG_BYTES, Buffer.alloc(5 * 1024 * 1024)]);
+    const res = await api()
+      .post(`/api/purchaseReceipts/uploadFile/${receipt._id}`)
+      .set(auth(designee.token))
+      .attach("file", big, { filename: "big.png", contentType: "image/png" });
+    expect(res.status).toBe(500);
+    expect(await countImages()).toBe(0);
+  });
+
   it("comprobante inexistente -> 404 y no guarda la imagen", async () => {
     const user = await createUser();
     const res = await api()

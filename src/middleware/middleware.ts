@@ -14,6 +14,8 @@ const invalidObjectIdMessage: string = "Invalid ObjectID";
 
 const MIMETYPES: string[] = ["image/jpeg", "image/png", "application/pdf"];
 const MIMETYPES_IMAGE: string[] = ["image/jpeg", "image/png"];
+// Files are kept in memory and stored inside a Mongo document (16 MB max).
+const MAX_FILE_SIZE: number = 5 * 1024 * 1024;
 
 export function auth(req: IRequestWithUser, res: Response, next: NextFunction) {
   const token: string = req.header("Authorization");
@@ -79,7 +81,7 @@ export const multerUpload = multer({
     if (MIMETYPES.includes(file.mimetype)) cb(null, true);
     else cb(new Error(`Only ${MIMETYPES.join(" - ")} mime types are allowed.`));
   },
-  limits: { fieldSize: 10000000 },
+  limits: { fieldSize: 10000000, fileSize: MAX_FILE_SIZE },
 });
 
 export const multerUploadImages = multer({
@@ -93,6 +95,7 @@ export const multerUploadImages = multer({
   },
   limits: {
     fieldSize: 10000000,
+    fileSize: MAX_FILE_SIZE,
   },
 });
 
