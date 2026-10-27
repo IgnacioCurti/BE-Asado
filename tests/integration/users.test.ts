@@ -111,6 +111,19 @@ describe("POST /api/users/register", () => {
     expect(res.body.password).toMatch(/^\$2[aby]\$10\$/);
   });
 
+  it("ignora verificationCode, profilePicture y _id del body", async () => {
+    const image = newId();
+    const forcedId = newId();
+    const res = await api()
+      .post("/api/users/register")
+      .send(registerBody({ verificationCode: "hash-falso", profilePicture: image, _id: forcedId }));
+    expect(res.status).toBe(201);
+    expect(res.body._id).not.toBe(forcedId);
+    const saved = await findUserByEmail("ana.perez@endava.com");
+    expect(saved!.verificationCode).toBeNull();
+    expect(saved!.profilePicture).toBeNull();
+  });
+
   it("guarda el email en minúsculas", async () => {
     const res = await api().post("/api/users/register").send(registerBody({ email: "Ana.Perez@ENDAVA.com" }));
     expect(res.status).toBe(201);
