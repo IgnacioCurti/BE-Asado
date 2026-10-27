@@ -70,15 +70,17 @@ export async function uploadFileTransferReceipt(
   res: Response
 ): Promise<Response> {
   try {
-    if (req.file) {
-      const imageId = await saveImage(req.file);
-      const transferReceipt: ITransferReceipt = await TransferReceipt.findById(
-        req.params.transferReceipt
-      );
-      transferReceipt.image = imageId;
-      await transferReceipt.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
-    }
+    if (!req.file)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "No file was uploaded." });
+    const imageId = await saveImage(req.file);
+    const transferReceipt: ITransferReceipt = await TransferReceipt.findById(
+      req.params.transferReceipt
+    );
+    transferReceipt.image = imageId;
+    await transferReceipt.save();
+    return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)

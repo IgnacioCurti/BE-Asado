@@ -75,19 +75,21 @@ export async function uploadFilePurchaseReceipt(
   res: Response
 ): Promise<Response> {
   try {
-    if (req.file) {
-      const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
-      let purchaseReceipt: IPurchaseReceipt | null =
-        await PurchaseReceipt.findById(req.params.purchaseReceipt);
-      if (!purchaseReceipt) {
-        return res.status(STATUS_CODES.NOT_FOUND).json({
-          message: "The purchase receipt with the given ID was not found.",
-        });
-      }
-      purchaseReceipt.image = imageId;
-      await purchaseReceipt.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
+    if (!req.file)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "No file was uploaded." });
+    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+    let purchaseReceipt: IPurchaseReceipt | null =
+      await PurchaseReceipt.findById(req.params.purchaseReceipt);
+    if (!purchaseReceipt) {
+      return res.status(STATUS_CODES.NOT_FOUND).json({
+        message: "The purchase receipt with the given ID was not found.",
+      });
     }
+    purchaseReceipt.image = imageId;
+    await purchaseReceipt.save();
+    return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
