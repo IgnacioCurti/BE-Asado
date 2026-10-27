@@ -696,6 +696,55 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(byType.penalizationOneWeek?.map((r) => r.datetime)).toEqual(["2030-04-07T20:00:00.000Z"]);
   });
 
+  it("editar un evento que ya pasó no vuelve a crear los recordatorios ya enviados", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({
+      organizer: organizer._id,
+      shoppingDesignee: [organizer._id],
+      datetime: new Date("2020-01-10T21:00:00.000Z"),
+      penalization: 10,
+      penalizationStartDate: new Date("2020-01-15T00:00:00.000Z"),
+    });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(
+        editBody({
+          datetime: "2020-01-10T21:00:00.000Z",
+          state: "closed",
+          penalization: 10,
+          penalizationStartDate: "2020-01-15T00:00:00.000Z",
+        })
+      )
+      .expect(200);
+    expect(await findReminders(event._id)).toEqual([]);
+  });
+
+  it("reprogramar a futuro un evento cuyo recordatorio ya se envió lo vuelve a crear", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id, datetime: new Date("2020-01-10T21:00:00.000Z") });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ datetime: "2030-03-01T22:00:00.000Z" }))
+      .expect(200);
+    const byType = await remindersByType(event._id);
+    expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2030-03-01T21:30:00.000Z"]);
+  });
+
+  it("un recordatorio pendiente se actualiza aunque la nueva fecha ya haya pasado", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    await createReminder({ event: event._id, type: "eventStart", datetime: new Date("2030-01-10T20:30:00.000Z") });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ datetime: "2020-01-10T21:00:00.000Z" }))
+      .expect(200);
+    const byType = await remindersByType(event._id);
+    expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2020-01-10T20:30:00.000Z"]);
+  });
+
   it("[comportamiento actual] quitar la penalización NO borra sus recordatorios", async () => {
     const organizer = await createUser();
     const created = await api()
