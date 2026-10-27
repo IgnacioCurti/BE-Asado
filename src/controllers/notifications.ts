@@ -43,6 +43,17 @@ async function notifyUser(
 
 export async function notifyNewEvent(eventId: string): Promise<void> {
   try {
+    const event: IEvent | null = await Event.findById(eventId);
+
+    if (!event) {
+      throw new Error(`Event with ID ${eventId} not found.`);
+    }
+
+    // The event may have changed between its creation and this cron run.
+    if (event.isPrivate || event.state === "cancelled") {
+      return;
+    }
+
     const users: IUser[] = await User.find({ "notifications.newEvent": true });
     const message: string = newEventTemplate(eventId);
 
@@ -160,6 +171,12 @@ export async function reminderCheck(
     for (const reminder of reminders) {
       const eventId: string = reminder.event.toString();
       switch (reminder.type) {
+        case "newEvent":
+          await notifyNewEvent(eventId);
+          console.log(
+            `Notification sent for new event reminder for event ${eventId}`
+          );
+          break;
         case "eventStart":
           await notifyEventStart(eventId);
           console.log(

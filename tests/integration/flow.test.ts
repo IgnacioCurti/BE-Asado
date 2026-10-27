@@ -42,6 +42,8 @@ describe("Ciclo de vida completo de un evento", () => {
       })
       .expect(201);
     const eventId: string = created.body._id;
+    expect(sentEmails).toHaveLength(0);
+    await api().get("/api/cron/reminderCheck").expect(200);
     expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual(["beto@endava.com"]);
 
     // 3. Beto y Caro se suman; el evento queda lleno
