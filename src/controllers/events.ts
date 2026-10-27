@@ -727,11 +727,16 @@ export async function getMemberIndividualCost(
         )
     );
 
+    // Same per-receipt rounding as assignEventValues, so this matches the
+    // amounts shown by getMembersAmount.
     const userAmount: number = userReceipts.reduce(
-      (total: number, receipt: IPurchaseReceipt) => {
-        total += receipt.amount / receipt.participants.length;
-        return total;
-      },
+      (total: number, receipt: IPurchaseReceipt) =>
+        Number(
+          (
+            total +
+            Number((receipt.amount / receipt.participants.length).toFixed(2))
+          ).toFixed(2)
+        ),
       0
     );
 
