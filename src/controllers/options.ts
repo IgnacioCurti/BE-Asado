@@ -2,23 +2,19 @@ import { Request, Response } from "express";
 import { Option } from "../models/option.js";
 import { Event } from "../models/event.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
-import { IEvent, IEventWithMembers, IOption, IUser, IUserName } from "../models/interfaces.js";
+import { IEvent, IEventWithMembers, IOption, IRequestWithUser, IUser, IUserName } from "../models/interfaces.js";
 import mongoose from "mongoose";
 
+// Votes are only changed through voteOption/unvoteOption, so create and edit
+// ignore any participants sent in the body.
 export async function createOption(
   req: Request,
   res: Response
 ): Promise<Response> {
   try {
-    const {
-      title,
-      participants,
-    }: { title: string; participants: mongoose.Types.ObjectId[] } = req.body;
+    const { title }: { title: string } = req.body;
 
-    const newOption: IOption = new Option({
-      title,
-      participants,
-    });
+    const newOption: IOption = new Option({ title });
 
     await newOption.save();
 
@@ -39,14 +35,11 @@ export async function editOptions(
   res: Response
 ): Promise<Response> {
   try {
-    const {
-      title,
-      participants,
-    }: { title: string; participants: mongoose.Types.ObjectId[] } = req.body;
+    const { title }: { title: string } = req.body;
 
     const updatedOption: IOption | null = await Option.findByIdAndUpdate(
       req.params.id,
-      { title, participants },
+      { title },
       { new: true }
     );
 
@@ -62,6 +55,46 @@ export async function editOptions(
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
   }
+}
+
+async function updateOwnVote(
+  req: IRequestWithUser,
+  res: Response,
+  operator: "$addToSet" | "$pull"
+): Promise<Response> {
+  try {
+    const updatedOption: IOption | null = await Option.findByIdAndUpdate(
+      req.params.id,
+      { [operator]: { participants: req.user._id } },
+      { new: true }
+    );
+
+    if (!updatedOption) {
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: "Option not found" });
+    }
+
+    return res.status(STATUS_CODES.OK).json(updatedOption);
+  } catch (error) {
+    return res
+      .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
+      .json({ message: error?.message || "Internal server error" });
+  }
+}
+
+export async function voteOption(
+  req: IRequestWithUser,
+  res: Response
+): Promise<Response> {
+  return updateOwnVote(req, res, "$addToSet");
+}
+
+export async function unvoteOption(
+  req: IRequestWithUser,
+  res: Response
+): Promise<Response> {
+  return updateOwnVote(req, res, "$pull");
 }
 
 export async function deleteOption(
