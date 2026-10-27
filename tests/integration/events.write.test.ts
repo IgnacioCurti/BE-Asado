@@ -596,6 +596,23 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(await findEvent(event._id)).toMatchObject({ title: "Asado editado", state: "closed" });
   });
 
+  it("el estado se guarda en minúsculas y el evento sigue operativo", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
+    const res = await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ state: "Closed" }));
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe("closed");
+
+    const receipt = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(organizer.token))
+      .send({ description: "carne", amount: 100 });
+    expect(receipt.status).toBe(201);
+  });
+
   it("un shoppingDesignee (no organizador) también puede editar", async () => {
     const organizer = await createUser();
     const designee = await createUser();

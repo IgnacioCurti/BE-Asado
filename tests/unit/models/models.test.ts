@@ -161,11 +161,11 @@ describe("Event schema", () => {
   });
 
   it.each(["available", "closed", "readyforpayment", "cancelled", "finished", "CLOSED", "ReadyForPayment"])(
-    "acepta el estado %s (sin importar mayúsculas)",
+    "acepta el estado %s (sin importar mayúsculas) y lo guarda en minúsculas",
     (state) => {
       const event = new Event({ ...valid(), state });
       expect(errorsOf(event)).toEqual([]);
-      expect(event.state).toBe(state); // no normaliza
+      expect(event.state).toBe(state.toLowerCase());
     }
   );
 

@@ -13,6 +13,7 @@ const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
   state: {
     type: String,
     required: true,
+    lowercase: true,
     default: "available",
     validate: {
       validator: function (v: string): boolean {
