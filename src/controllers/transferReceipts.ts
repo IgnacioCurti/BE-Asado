@@ -103,14 +103,10 @@ export async function createTransferReceipt(
         message: cannotCreateTransferReceiptMessage,
       });
     if (hasUploadedValue.hasUploaded) {
-      const oldTransferReceipt: ITransferReceipt | null =
-        await TransferReceipt.findByIdAndRemove(
-          hasUploadedValue.transferReceipt
-        );
-      const index: number = event.transferReceipts.indexOf(
-        oldTransferReceipt._id
+      await TransferReceipt.findByIdAndRemove(hasUploadedValue.transferReceipt);
+      event.transferReceipts = event.transferReceipts.filter(
+        (id) => !id.equals(hasUploadedValue.transferReceipt)
       );
-      event.transferReceipts.splice(index, 1);
       await event.save();
     }
     let transferReceipt = new TransferReceipt(req.body);
@@ -216,8 +212,9 @@ export async function deleteTransferReceipt(
         message: cannotCreateTransferReceiptMessage,
       });
     await TransferReceipt.findByIdAndDelete(transferReceipt._id);
-    const index: number = event.transferReceipts.indexOf(transferReceipt._id);
-    event.transferReceipts.splice(index, 1);
+    event.transferReceipts = event.transferReceipts.filter(
+      (id) => !id.equals(transferReceipt._id)
+    );
     await event.save();
     return res.status(STATUS_CODES.OK).json(transferReceipt);
   } catch (error) {

@@ -387,6 +387,17 @@ describe("DELETE /api/transferReceipts/deleteTransferReceipt/:id", () => {
     expect((await findEvent(event._id))!.transferReceipts).toEqual([keep._id]);
   });
 
+  it("si el comprobante no está en la lista del evento, la lista no cambia", async () => {
+    const { beto, caro, event } = await paymentScenario();
+    const listed = await createTransferReceipt({ event: event._id, user: caro._id, amount: 100 });
+    const unlisted = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, attachToEvent: false });
+
+    await api().delete(`/api/transferReceipts/deleteTransferReceipt/${unlisted._id}`).set(auth(beto.token)).expect(200);
+
+    expect(await findTransferReceipt(unlisted._id)).toBeNull();
+    expect((await findEvent(event._id))!.transferReceipts).toEqual([listed._id]);
+  });
+
   it("fuera de readyforpayment responde 400 y no borra el comprobante", async () => {
     const { beto, event } = await paymentScenario("finished");
     const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
