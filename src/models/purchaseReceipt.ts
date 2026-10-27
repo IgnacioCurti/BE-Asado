@@ -11,7 +11,7 @@ const purchaseReceiptSchema: mongoose.Schema =
 
     description: { type: String, required: true },
 
-    amount: { type: Number, required: true },
+    amount: { type: Number, required: true, min: 0 },
 
     event: {
       type: mongoose.Schema.Types.ObjectId,

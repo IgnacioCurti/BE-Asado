@@ -180,6 +180,15 @@ describe("Event schema", () => {
     expect(event.datetime).toEqual(new Date("2030-05-01T10:00:00.000Z"));
   });
 
+  it.each([0, -3])("rechaza memberLimit %d (mínimo 1)", (memberLimit) => {
+    expect(errorsOf(new Event({ ...valid(), memberLimit }))).toEqual(["memberLimit"]);
+  });
+
+  it("rechaza una penalización negativa y acepta 0", () => {
+    expect(errorsOf(new Event({ ...valid(), penalization: -1 }))).toEqual(["penalization"]);
+    expect(errorsOf(new Event({ ...valid(), penalization: 0 }))).toEqual([]);
+  });
+
   it("rechaza memberLimit no numérico y fechas inválidas", () => {
     expect(errorsOf(new Event({ ...valid(), memberLimit: "diez", datetime: "no-es-fecha" }))).toEqual([
       "datetime",
@@ -231,6 +240,12 @@ describe("TransferReceipt schema", () => {
     expect(receipt.receiver).toBeNull();
     expect(receipt.description).toBeUndefined();
   });
+
+  it("rechaza un monto negativo y acepta 0 (pago aprobado sin comprobante)", () => {
+    const base = { user: oid(), event: oid(), datetime: new Date() };
+    expect(errorsOf(new TransferReceipt({ ...base, amount: -1 }))).toEqual(["amount"]);
+    expect(errorsOf(new TransferReceipt({ ...base, amount: 0 }))).toEqual([]);
+  });
 });
 
 describe("PurchaseReceipt schema", () => {
@@ -249,6 +264,12 @@ describe("PurchaseReceipt schema", () => {
     expect(
       errorsOf(new PurchaseReceipt({ description: "", amount: 10, event: oid(), shoppingDesignee: oid() }))
     ).toEqual(["description"]);
+  });
+
+  it("rechaza un monto negativo", () => {
+    expect(
+      errorsOf(new PurchaseReceipt({ description: "Carne", amount: -10, event: oid(), shoppingDesignee: oid() }))
+    ).toEqual(["amount"]);
   });
 });
 
