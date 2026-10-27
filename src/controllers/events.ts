@@ -412,6 +412,34 @@ export async function editRoles(
   }
 }
 
+// States an event can be moved to through editEvent. "finished" is only set
+// by the system once every payment is approved; cancelled/finished are final.
+const ALLOWED_STATE_TRANSITIONS: Record<string, string[]> = {
+  available: ["closed", "cancelled"],
+  closed: ["available", "readyforpayment", "cancelled"],
+  readyforpayment: ["closed"],
+  cancelled: [],
+  finished: [],
+};
+
+async function stateTransitionError(
+  event: IEvent,
+  nextState: string
+): Promise<string | null> {
+  const currentState: string = event.state;
+  if (nextState === currentState) return null;
+  if (!ALLOWED_STATE_TRANSITIONS[currentState]?.includes(nextState))
+    return `Cannot change the event state from "${currentState}" to "${nextState}".`;
+  if (nextState === "readyforpayment" && event.purchaseReceipts.length === 0)
+    return "The event needs at least one purchase receipt to be ready for payment.";
+  if (
+    currentState === "readyforpayment" &&
+    (await TransferReceipt.exists({ event: event._id, hasPaid: true }))
+  )
+    return "The event can't go back to closed because some payments were already approved.";
+  return null;
+}
+
 export async function editEvent(
   req: Request,
   res: Response
@@ -422,6 +450,14 @@ export async function editEvent(
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
+    const transitionError: string | null = await stateTransitionError(
+      event,
+      String(req.body.state ?? "").toLowerCase()
+    );
+    if (transitionError)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: transitionError });
     event.title = req.body.title;
     event.datetime = req.body.datetime;
     event.description = req.body.description;
