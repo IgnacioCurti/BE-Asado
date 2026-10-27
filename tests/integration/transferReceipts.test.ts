@@ -253,7 +253,7 @@ describe("PUT /api/transferReceipts/approveTransferReceipt/:id/:event", () => {
     expect((await findEvent(event._id))!.state).toBe("finished");
   });
 
-  it("[BUG - comportamiento actual] 'finished' cuenta aprobaciones, no quién pagó: un pago aprobado del acreedor cuenta como deuda saldada", async () => {
+  it("'finished' mira quién pagó: un pago aprobado del acreedor no salda la deuda de otro", async () => {
     const { ana, beto, event } = await paymentScenario();
     // Ana es acreedora (no debe nada) pero tiene un comprobante aprobado
     await createTransferReceipt({ event: event._id, user: ana._id, amount: 0, hasPaid: true });
@@ -261,8 +261,8 @@ describe("PUT /api/transferReceipts/approveTransferReceipt/:id/:event", () => {
 
     await api().put(`/api/transferReceipts/approveTransferReceipt/${betoReceipt._id}/${event._id}`).set(auth(ana.token)).expect(200);
 
-    // Caro nunca pagó, pero 2 aprobados == 2 esperados
-    expect((await findEvent(event._id))!.state).toBe("finished");
+    // Caro nunca pagó: el evento sigue esperando su pago
+    expect((await findEvent(event._id))!.state).toBe("readyforpayment");
   });
 
   it("ya aprobado -> 400", async () => {

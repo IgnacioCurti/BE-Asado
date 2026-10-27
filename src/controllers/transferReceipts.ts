@@ -248,11 +248,11 @@ export async function isFinished(eventId: string): Promise<boolean> {
     (t) => t.receiver !== null
   );
 
-  const approvedTransfers: ITransferReceipt[] = event.transferReceipts.filter(
-    (r) => r.hasPaid === true
+  return expectedTransfers.every((transfer) =>
+    event.transferReceipts.some(
+      (r) => r.hasPaid === true && r.user.equals(transfer.userId)
+    )
   );
-
-  return expectedTransfers.length === approvedTransfers.length;
 }
 
 export async function membersWhoHaveUploaded(
