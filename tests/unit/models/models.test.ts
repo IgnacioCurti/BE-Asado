@@ -57,24 +57,30 @@ describe("User schema", () => {
   });
 
   describe("email", () => {
-    it.each(["ana@endava.com", "ana.perez+tag@endava.com", "davidmartingallegos@gmail.com"])("acepta %s", (email) => {
+    it.each([
+      "ana@endava.com",
+      "ana.perez+tag@endava.com",
+      "ana@gmail.com",
+      "ana@mail.endava.com",
+      "ana@ENDAVA.COM",
+    ])("acepta %s (cualquier dominio)", (email) => {
       expect(errorsOf(new User({ ...valid(), email }))).toEqual([]);
     });
 
     it.each([
-      ["otro dominio", "ana@gmail.com"],
-      ["subdominio", "ana@mail.endava.com"],
-      ["dominio en mayúsculas (el schema no normaliza)", "ana@ENDAVA.COM"],
       ["sin arroba", "anaendava.com"],
       ["dos arrobas", "ana@x@endava.com"],
+      ["sin parte local", "@endava.com"],
+      ["dominio sin punto", "ana@endava"],
+      ["con espacios", "ana perez@endava.com"],
       ["string vacío", ""],
     ])("rechaza %s", (_label, email) => {
       expect(errorsOf(new User({ ...valid(), email }))).toContain("email");
     });
 
-    it("el mensaje de error menciona que no es un email de endava", () => {
-      const error = new User({ ...valid(), email: "ana@gmail.com" }).validateSync();
-      expect(error?.errors.email.message).toBe("ana@gmail.com is not a valid endava email.");
+    it("el mensaje de error es genérico", () => {
+      const error = new User({ ...valid(), email: "ana@endava" }).validateSync();
+      expect(error?.errors.email.message).toBe("ana@endava is not a valid email.");
     });
   });
 

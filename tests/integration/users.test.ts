@@ -183,16 +183,17 @@ describe("POST /api/users/register", () => {
     expect(res.status).toBe(201);
   });
 
-  it("[comportamiento actual] email de otro dominio -> 500 con el mensaje de validación", async () => {
+  it("un email de cualquier dominio se puede registrar", async () => {
     const res = await api().post("/api/users/register").send(registerBody({ email: "ana@gmail.com" }));
-    expect(res.status).toBe(500);
-    expect(res.body.message).toContain("ana@gmail.com is not a valid endava email.");
-    expect(await countUsers()).toBe(0);
+    expect(res.status).toBe(201);
+    expect(res.body.email).toBe("ana@gmail.com");
   });
 
-  it("el email de excepción (gmail) se puede registrar", async () => {
-    const res = await api().post("/api/users/register").send(registerBody({ email: "davidmartingallegos@gmail.com" }));
-    expect(res.status).toBe(201);
+  it("[comportamiento actual] email con formato inválido -> 500 con el mensaje de validación", async () => {
+    const res = await api().post("/api/users/register").send(registerBody({ email: "ana@gmail" }));
+    expect(res.status).toBe(500);
+    expect(res.body.message).toContain("ana@gmail is not a valid email.");
+    expect(await countUsers()).toBe(0);
   });
 
   it("[comportamiento actual] dieta inválida -> 500", async () => {
