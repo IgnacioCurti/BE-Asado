@@ -163,6 +163,63 @@ export async function transferReceiptOwner(req: IRequestWithUser, res: Response,
   }
 }
 
+function isOrganizerOrDesignee(event: IEvent, userId: string): boolean {
+  return (
+    event.organizer.toString() === userId ||
+    event.shoppingDesignee.some((id) => id.toString() === userId)
+  );
+}
+
+// For option routes: the event comes from :event (create) or from the
+// option in :id (edit/delete). Only its organizer or a designee may manage it.
+export async function optionManager(req: IRequestWithUser, res: Response, next: NextFunction) {
+  try {
+    const eventId: string | undefined = req.params.event;
+    const targetId: string = eventId ?? req.params.id;
+    if (!isValidId(targetId))
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: invalidObjectIdMessage });
+    const event: IEvent | null = eventId
+      ? await Event.findById(eventId)
+      : await Event.findOne({ options: targetId });
+    if (!event)
+      return res.status(STATUS_CODES.NOT_FOUND).json({
+        message: eventId
+          ? "The event with the given ID does not exist."
+          : "Option not found",
+      });
+    if (!isOrganizerOrDesignee(event, req.user._id))
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message:
+          "Access denied. The user is not the event's shopping designee or organizer.",
+      });
+    next();
+  } catch (error: any) {
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
+  }
+}
+
+// For voting: the user must be a member of the event the option in :id belongs to.
+export async function optionVoter(req: IRequestWithUser, res: Response, next: NextFunction) {
+  try {
+    if (!isValidId(req.params.id))
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: invalidObjectIdMessage });
+    const event: IEvent | null = await Event.findOne({ options: req.params.id });
+    if (!event)
+      return res.status(STATUS_CODES.NOT_FOUND).json({ message: "Option not found" });
+    if (!event.members.some((member) => member.toString() === req.user._id))
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message: "Access denied. The user is not a participant of the event.",
+      });
+    next();
+  } catch (error: any) {
+    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
+  }
+}
+
 export async function shoppingDesigneeOrEventOrganizer(req: IRequestWithUser, res: Response, next: NextFunction) {
   try {
     if (!isValidId(req.user._id) || !isValidId(req.params.id))

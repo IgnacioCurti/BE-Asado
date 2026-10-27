@@ -85,6 +85,8 @@ const protectedRoutes: [string, string][] = [
   ["post", `/api/options/createOption/${ID}`],
   ["put", `/api/options/editOption/${ID}`],
   ["delete", `/api/options/deleteOption/${ID}`],
+  ["put", `/api/options/vote/${ID}`],
+  ["delete", `/api/options/vote/${ID}`],
   ["get", `/api/purchaseReceipts/getPurchaseReceiptsByEvent/${ID}`],
   ["get", `/api/purchaseReceipts/getPurchaseReceiptById/${ID}/${ID2}`],
   ["put", "/api/purchaseReceipts/assignMembersToReceipt"],
