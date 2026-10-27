@@ -698,7 +698,7 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(res.body.penalizationStartDate).toBeNull();
   });
 
-  it.each(["closed", "readyforpayment", "finished", "cancelled"])(
+  it.each(["closed", "cancelled"])(
     "pasar a %s sin compradores asignados -> 400 y no guarda cambios",
     async (state) => {
       const organizer = await createUser();
@@ -710,11 +710,92 @@ describe("PUT /api/events/editEvent/:id", () => {
     }
   );
 
-  it("[comportamiento actual] estado inválido -> 500", async () => {
+  it("estado inválido -> 400", async () => {
     const organizer = await createUser();
     const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
     const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "x" }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: 'Cannot change the event state from "available" to "x".' });
+  });
+
+  describe("transiciones de estado", () => {
+    async function eventIn(state: string, opts: { purchaseReceipt?: boolean } = {}) {
+      const organizer = await createUser();
+      const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id], state });
+      if (opts.purchaseReceipt) {
+        await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
+      }
+      return { organizer, event };
+    }
+
+    it.each([
+      ["available", "closed"],
+      ["available", "cancelled"],
+      ["closed", "available"],
+      ["closed", "cancelled"],
+      ["readyforpayment", "closed"],
+      ["closed", "closed"],
+      ["finished", "finished"],
+    ])("%s -> %s está permitido", async (from, to) => {
+      const { organizer, event } = await eventIn(from);
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: to }));
+      expect(res.status).toBe(200);
+      expect((await findEvent(event._id))!.state).toBe(to);
+    });
+
+    it("closed -> readyforpayment está permitido si hay comprobantes de compra", async () => {
+      const { organizer, event } = await eventIn("closed", { purchaseReceipt: true });
+      const res = await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ state: "readyforpayment" }));
+      expect(res.status).toBe(200);
+    });
+
+    it.each([
+      ["available", "readyforpayment"],
+      ["available", "finished"],
+      ["closed", "finished"],
+      ["readyforpayment", "available"],
+      ["readyforpayment", "cancelled"],
+      ["readyforpayment", "finished"],
+      ["cancelled", "available"],
+      ["cancelled", "closed"],
+      ["finished", "available"],
+      ["finished", "readyforpayment"],
+    ])("%s -> %s -> 400 y no guarda cambios", async (from, to) => {
+      const { organizer, event } = await eventIn(from, { purchaseReceipt: true });
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: to }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ message: `Cannot change the event state from "${from}" to "${to}".` });
+      expect(await findEvent(event._id)).toMatchObject({ state: from, title: event.title });
+    });
+
+    it("closed -> readyforpayment sin comprobantes de compra -> 400", async () => {
+      const { organizer, event } = await eventIn("closed");
+      const res = await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ state: "readyforpayment" }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ message: "The event needs at least one purchase receipt to be ready for payment." });
+    });
+
+    it("readyforpayment -> closed con transferencias aprobadas -> 400", async () => {
+      const { organizer, event } = await eventIn("readyforpayment", { purchaseReceipt: true });
+      await createTransferReceipt({ event: event._id, user: organizer._id, amount: 10, hasPaid: true });
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "closed" }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        message: "The event can't go back to closed because some payments were already approved.",
+      });
+    });
+
+    it("el estado del body no distingue mayúsculas", async () => {
+      const { organizer, event } = await eventIn("available");
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "CLOSED" }));
+      expect(res.status).toBe(200);
+    });
   });
 
   it("[comportamiento actual] campos obligatorios ausentes -> 500", async () => {
