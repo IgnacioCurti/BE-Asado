@@ -105,20 +105,50 @@ export async function uploadFileTransferReceipt(
   }
 }
 
+// The transfer a member owes, as computed from the event's purchase receipts,
+// or undefined if they don't have to transfer anything.
+async function expectedTransferOf(
+  eventId: string,
+  userId: string
+): Promise<ITransferInfo | undefined> {
+  const event: IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null =
+    await Event.findById(eventId).populate({
+      path: "purchaseReceipts",
+      populate: [
+        { path: "shoppingDesignee", model: "User" },
+        { path: "participants", model: "User" },
+      ],
+    });
+  if (!event) return undefined;
+  const transferInfo: ITransferInfo[] = calculateTransfersInfo(
+    assignEventValues(event.purchaseReceipts)
+  );
+  return transferInfo.find(
+    (t) => t.receiver !== null && t.userId.equals(userId)
+  );
+}
+
 export async function createTransferReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    const hasUploadedValue: IHasUploadedInfo = await hasUploaded(
-      req.body.user,
-      req.params.event
-    );
+    const userId: string = req.user._id;
     const event: IEvent = await Event.findById(req.params.event);
     if (event.state !== "readyforpayment")
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: cannotCreateTransferReceiptMessage,
       });
+    const expectedTransfer: ITransferInfo | undefined =
+      await expectedTransferOf(req.params.event, userId);
+    if (!expectedTransfer)
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "The user has no transfer to make in this event.",
+      });
+    const hasUploadedValue: IHasUploadedInfo = await hasUploaded(
+      userId,
+      req.params.event
+    );
     if (hasUploadedValue.hasUploaded) {
       const oldTransferReceipt: ITransferReceipt | null =
         await TransferReceipt.findByIdAndRemove(
@@ -131,7 +161,15 @@ export async function createTransferReceipt(
       );
       await event.save();
     }
-    let transferReceipt = new TransferReceipt(req.body);
+    // Who pays, how much and to whom come from the server; the body only
+    // describes the payment.
+    let transferReceipt = new TransferReceipt({
+      description: req.body.description,
+      paymentMethod: req.body.paymentMethod,
+      user: new mongoose.Types.ObjectId(userId),
+      amount: expectedTransfer.amount,
+      receiver: expectedTransfer.receiver.receiverId,
+    });
     transferReceipt.event = new mongoose.Types.ObjectId(req.params.event);
     let date = new Date();
     date.setHours(date.getHours() - 3);

@@ -146,23 +146,45 @@ describe("POST /api/transferReceipts/createTransferReceipt/:event", () => {
     expect(await findTransferReceipt(approved._id)).toBeNull();
   });
 
-  it("[SEGURIDAD - comportamiento actual] el usuario se toma del body: se puede crear en nombre de otro", async () => {
+  it("el usuario sale del token: no se puede crear en nombre de otro", async () => {
     const { beto, caro, event } = await paymentScenario();
     const res = await api()
       .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
       .set(auth(beto.token))
       .send({ user: caro._id, amount: 100 });
     expect(res.status).toBe(201);
-    expect(res.body.user).toBe(caro._id);
+    expect(res.body.user).toBe(beto._id);
   });
 
-  it("[SEGURIDAD - comportamiento actual] se puede enviar hasPaid: true y quedar auto-aprobado", async () => {
+  it("ignora hasPaid del body: el comprobante nace sin aprobar", async () => {
     const { beto, event } = await paymentScenario();
     const res = await api()
       .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
       .set(auth(beto.token))
       .send({ user: beto._id, amount: 100, hasPaid: true });
-    expect(res.body.hasPaid).toBe(true);
+    expect(res.body.hasPaid).toBe(false);
+  });
+
+  it("receiver y amount los calcula el backend; los del body se ignoran", async () => {
+    const { ana, beto, caro, event } = await paymentScenario();
+    const res = await api()
+      .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
+      .set(auth(beto.token))
+      .send({ amount: 1, receiver: caro._id });
+    expect(res.status).toBe(201);
+    // compra de 300 de Ana entre 3: Beto le debe 100 a Ana
+    expect(res.body).toMatchObject({ amount: 100, receiver: ana._id });
+  });
+
+  it("quien no tiene que transferir nada -> 400", async () => {
+    const { ana, event } = await paymentScenario();
+    const res = await api()
+      .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
+      .set(auth(ana.token))
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "The user has no transfer to make in this event." });
+    expect(await countTransferReceipts()).toBe(0);
   });
 
   it.each(["available", "closed", "finished", "cancelled"])("evento en estado %s -> 400", async (state) => {
@@ -196,16 +218,17 @@ describe("POST /api/transferReceipts/createTransferReceipt/:event", () => {
     expect(await countTransferReceipts()).toBe(0);
   });
 
-  it("[comportamiento actual] sin amount -> 500, pero el comprobante anterior ya fue borrado", async () => {
+  it("sin amount en el body igual se crea (el monto es el calculado) y reemplaza al anterior", async () => {
     const { beto, event } = await paymentScenario();
     const old = await createTransferReceipt({ event: event._id, user: beto._id, amount: 50 });
     const res = await api()
       .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
       .set(auth(beto.token))
-      .send({ user: beto._id });
-    expect(res.status).toBe(500);
+      .send({});
+    expect(res.status).toBe(201);
+    expect(res.body.amount).toBe(100);
     expect(await findTransferReceipt(old._id)).toBeNull();
-    expect((await findEvent(event._id))!.transferReceipts).toEqual([]);
+    expect((await findEvent(event._id))!.transferReceipts).toEqual([res.body._id]);
   });
 });
 
