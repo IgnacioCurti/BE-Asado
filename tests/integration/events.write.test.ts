@@ -228,7 +228,7 @@ describe("POST /api/events/createEvent", () => {
     it("un evento público notifica por mail a los usuarios con notifications.newEvent", async () => {
       const organizer = await createUser();
       const wantsIt = await createUser({ name: "Quiere", notifications: { newEvent: true } as any });
-      const alt = await createUser({ name: "Alt", alternativeEmail: "alt@gmail.com", notifications: { newEvent: true } as any });
+      const other = await createUser({ name: "Otro", notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: false } as any });
 
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
@@ -237,7 +237,7 @@ describe("POST /api/events/createEvent", () => {
       expect(res.status).toBe(201);
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
         { email: wantsIt.email, name: "Quiere" },
-        { email: "alt@gmail.com", name: "Alt" },
+        { email: other.email, name: "Otro" },
       ]);
       for (const mail of sentEmails) {
         expect(mail.payload.subject).toBe("FoodSpot | Nuevo evento");

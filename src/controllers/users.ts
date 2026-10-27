@@ -26,7 +26,6 @@ const REGISTER_FIELDS: string[] = [
   "name",
   "lastName",
   "email",
-  "alternativeEmail",
   "password",
   "cbu",
   "alias",
@@ -206,9 +205,6 @@ export async function editUser(req: Request, res: Response): Promise<Response> {
         .json({ message: userNotFoundMessage });
     user.name = req.body.name ? req.body.name : user.name;
     user.lastName = req.body.lastName ? req.body.lastName : user.lastName;
-    user.alternativeEmail = req.body.alternativeEmail
-      ? req.body.alternativeEmail.toLowerCase()
-      : null;
     user.specialDiet = req.body.specialDiet ?? user.specialDiet;
     user.alias = req.body.alias;
     user.cbu = req.body.cbu;

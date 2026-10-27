@@ -22,21 +22,6 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
     },
   },
 
-  alternativeEmail: {
-    type: String,
-    default: null,
-    validate: {
-      validator: function (v: string | null): boolean {
-        if (v == null) return true;
-        let username: string, domain: string, rest: string[];
-        [username, domain, ...rest] = v.split("@");
-        if (rest.length) return false;
-        return true;
-      },
-      message: (props) => `${props.value} is not a valid email.`,
-    },
-  },
-
   password: { type: String, required: true },
 
   verificationCode: { type: String, default: null },

@@ -46,7 +46,6 @@ describe("GET /api/users/getUsers", () => {
       name: "Ana",
       lastName: ana.lastName,
       email: ana.email,
-      alternativeEmail: null,
       cbu: null,
       alias: null,
       specialDiet: [],
@@ -92,7 +91,6 @@ describe("POST /api/users/register", () => {
       lastName: "Pérez",
       email: "ana.perez@endava.com",
       specialDiet: ["vegan"],
-      alternativeEmail: null,
       cbu: null,
       alias: null,
       profilePicture: null,
@@ -136,7 +134,7 @@ describe("POST /api/users/register", () => {
     expect(res.status).toBe(200);
   });
 
-  it("acepta campos opcionales (cbu, alias, alternativeEmail, notifications)", async () => {
+  it("acepta campos opcionales (cbu, alias, notifications) e ignora alternativeEmail", async () => {
     const res = await api()
       .post("/api/users/register")
       .send(
@@ -151,9 +149,9 @@ describe("POST /api/users/register", () => {
     expect(res.body).toMatchObject({
       cbu: "0000003100010000000001",
       alias: "ana.mp",
-      alternativeEmail: "ana@gmail.com",
       notifications: { newEvent: true, eventStart: true, penalizationStart: false, penalizationOneWeek: false },
     });
+    expect(res.body).not.toHaveProperty("alternativeEmail");
   });
 
   it("email ya registrado (sin importar mayúsculas) -> 400", async () => {
@@ -227,7 +225,6 @@ describe("PUT /api/users/editUser/:id", () => {
       .send({
         name: "Anita",
         lastName: "Gómez",
-        alternativeEmail: "ANITA@Gmail.com",
         specialDiet: ["celiac", "vegan"],
         alias: "anita.mp",
         cbu: "123",
@@ -239,14 +236,13 @@ describe("PUT /api/users/editUser/:id", () => {
       _id: user._id,
       name: "Anita",
       lastName: "Gómez",
-      alternativeEmail: "anita@gmail.com",
       specialDiet: ["celiac", "vegan"],
       alias: "anita.mp",
       cbu: "123",
       notifications: { newEvent: true, eventStart: false, penalizationStart: true, penalizationOneWeek: true },
     });
     const stored = await findUser(user._id);
-    expect(stored).toMatchObject({ name: "Anita", lastName: "Gómez", alternativeEmail: "anita@gmail.com" });
+    expect(stored).toMatchObject({ name: "Anita", lastName: "Gómez" });
   });
 
   it("no permite cambiar email ni password", async () => {
@@ -270,10 +266,14 @@ describe("PUT /api/users/editUser/:id", () => {
     expect(res.body).toMatchObject({ name: "Ana", lastName: "Pérez" });
   });
 
-  it("si alternativeEmail no viene, se borra (queda null)", async () => {
-    const user = await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().put(`/api/users/editUser/${user._id}`).set(auth(user.token)).send({ specialDiet: [] });
-    expect(res.body.alternativeEmail).toBeNull();
+  it("alternativeEmail del body se ignora sin error", async () => {
+    const user = await createUser();
+    const res = await api()
+      .put(`/api/users/editUser/${user._id}`)
+      .set(auth(user.token))
+      .send({ specialDiet: [], alternativeEmail: "a@b@c.com" });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty("alternativeEmail");
   });
 
   it("si alias/cbu no vienen, se borran del documento", async () => {
@@ -319,15 +319,6 @@ describe("PUT /api/users/editUser/:id", () => {
       .put(`/api/users/editUser/${user._id}`)
       .set(auth(user.token))
       .send({ specialDiet: ["keto"] });
-    expect(res.status).toBe(500);
-  });
-
-  it("[comportamiento actual] alternativeEmail con dos arrobas -> 500", async () => {
-    const user = await createUser();
-    const res = await api()
-      .put(`/api/users/editUser/${user._id}`)
-      .set(auth(user.token))
-      .send({ specialDiet: [], alternativeEmail: "a@b@c.com" });
     expect(res.status).toBe(500);
   });
 

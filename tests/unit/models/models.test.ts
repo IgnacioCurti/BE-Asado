@@ -42,7 +42,6 @@ describe("User schema", () => {
   it("aplica los defaults", () => {
     const user = new User(valid());
     expect(user.lastName).toBeUndefined();
-    expect(user.alternativeEmail).toBeNull();
     expect(user.verificationCode).toBeNull();
     expect(user.cbu).toBeNull();
     expect(user.alias).toBeNull();
@@ -84,14 +83,10 @@ describe("User schema", () => {
     });
   });
 
-  describe("alternativeEmail", () => {
-    it.each([null, "ana@gmail.com", "cualquier-texto-sin-arroba"])("acepta %s", (alternativeEmail) => {
-      expect(errorsOf(new User({ ...valid(), alternativeEmail }))).toEqual([]);
-    });
-
-    it("rechaza un email con más de una arroba", () => {
-      expect(errorsOf(new User({ ...valid(), alternativeEmail: "a@b@c.com" }))).toEqual(["alternativeEmail"]);
-    });
+  it("alternativeEmail ya no es parte del schema: se ignora", () => {
+    const user = new User({ ...valid(), alternativeEmail: "ana@gmail.com" });
+    expect(errorsOf(user)).toEqual([]);
+    expect(user.toObject()).not.toHaveProperty("alternativeEmail");
   });
 
   describe("specialDiet", () => {

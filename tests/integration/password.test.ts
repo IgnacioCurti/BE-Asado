@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import { api } from "../helpers/api.js";
 import { createUser, findUser } from "../helpers/fixtures.js";
 import { User } from "../../src/models/user.js";
+import mongoose from "mongoose";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 
 function codeFromLastEmail(): string {
@@ -32,18 +33,16 @@ describe("POST /api/password/forgot", () => {
     expect(await bcrypt.compare(code, stored!.verificationCode!)).toBe(true);
   });
 
-  it("si el usuario tiene email alternativo, el mail se manda ahí", async () => {
-    const user = await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().post("/api/password/forgot").send({ email: user.email });
-    expect(res.body).toEqual({ message: "Mail sent succesfully to ana@gmail.com." });
-    expect(sentEmails[0].payload.to[0].email).toBe("ana@gmail.com");
-  });
+  it("un alternativeEmail heredado en la base no se usa: ni para buscar ni para mandar", async () => {
+    const user = await createUser();
+    await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(user._id) }, { $set: { alternativeEmail: "ana@gmail.com" } });
 
-  it("también encuentra al usuario por su email alternativo", async () => {
-    await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().post("/api/password/forgot").send({ email: "ANA@gmail.com" });
-    expect(res.status).toBe(200);
-    expect(sentEmails[0].payload.to[0].email).toBe("ana@gmail.com");
+    const byAlternative = await api().post("/api/password/forgot").send({ email: "ana@gmail.com" });
+    expect(byAlternative.status).toBe(404);
+
+    const res = await api().post("/api/password/forgot").send({ email: user.email });
+    expect(res.body).toEqual({ message: `Mail sent succesfully to ${user.email}.` });
+    expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([user.email]);
   });
 
   it("el email no distingue mayúsculas", async () => {
@@ -126,12 +125,6 @@ describe("PUT /api/password/verifyCode", () => {
     const res = await api().put("/api/password/verifyCode").send({ email: "nadie@endava.com", verificationCode: "1" });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "User does not exist." });
-  });
-
-  it("solo busca por email principal (no por el alternativo)", async () => {
-    await createUser({ alternativeEmail: "ana@gmail.com", verificationCodePlain: "123456" });
-    const res = await api().put("/api/password/verifyCode").send({ email: "ana@gmail.com", verificationCode: "123456" });
-    expect(res.status).toBe(404);
   });
 
   it("si el usuario nunca pidió un código -> 400", async () => {

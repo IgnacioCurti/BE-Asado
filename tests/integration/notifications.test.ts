@@ -13,6 +13,8 @@ import {
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 import { getEventsDebtors } from "../../src/utils/utils.js";
+import { User } from "../../src/models/user.js";
+import mongoose from "mongoose";
 
 const HOUR: number = 60 * 60 * 1000;
 const hoursAgo = (h: number) => new Date(Date.now() - h * HOUR);
@@ -56,10 +58,12 @@ describe("GET /api/cron/reminderCheck", () => {
   });
 
   describe("eventStart", () => {
-    it("notifica a los miembros con notifications.eventStart (al email alternativo si tienen)", async () => {
+    it("notifica a los miembros con notifications.eventStart (siempre al email principal)", async () => {
       const a = await createUser({ name: "A", notifications: ALL_ON });
       const b = await createUser({ name: "B", notifications: ALL_OFF });
-      const c = await createUser({ name: "C", alternativeEmail: "c@gmail.com", notifications: ALL_ON });
+      const c = await createUser({ name: "C", notifications: ALL_ON });
+      // un alternativeEmail que haya quedado en la base de antes ya no se usa
+      await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(c._id) }, { $set: { alternativeEmail: "c@gmail.com" } });
       const notMember = await createUser({ notifications: ALL_ON });
       const event = await createEvent({ organizer: a._id, members: [a._id, b._id, c._id] });
       await createReminder({ event: event._id, type: "eventStart", datetime: hoursAgo(4) });
@@ -68,7 +72,7 @@ describe("GET /api/cron/reminderCheck", () => {
 
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
         { email: a.email, name: "A" },
-        { email: "c@gmail.com", name: "C" },
+        { email: c.email, name: "C" },
       ]);
       expect(sentEmails.map((m) => m.payload.to[0].email)).not.toContain(notMember.email);
       for (const mail of sentEmails) {
@@ -165,13 +169,14 @@ describe("GET /api/cron/reminderCheck", () => {
       expect(sentEmails).toHaveLength(0);
     });
 
-    it("usa el email alternativo del deudor si tiene", async () => {
-      const { event } = await debtScenario({ alternativeEmail: "beto@gmail.com" });
+    it("ignora un alternativeEmail heredado en la base: manda al email principal", async () => {
+      const { beto, event } = await debtScenario();
+      await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(beto._id) }, { $set: { alternativeEmail: "beto@gmail.com" } });
       await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
 
       await api().get("/api/cron/reminderCheck").expect(200);
 
-      expect(sentEmails.map((m) => m.payload.to[0])).toEqual([{ email: "beto@gmail.com", name: "Beto" }]);
+      expect(sentEmails.map((m) => m.payload.to[0])).toEqual([{ email: beto.email, name: "Beto" }]);
     });
 
     it("no notifica si el evento está cancelado", async () => {
