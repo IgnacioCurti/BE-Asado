@@ -358,6 +358,36 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     expect(res.body).toEqual({ message: "The event is full." });
   });
 
+  it("dos altas simultáneas con un solo lugar libre: entra una y la otra recibe 400", async () => {
+    const organizer = await createUser();
+    const a = await createUser();
+    const b = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id], memberLimit: 2 });
+
+    const results = await Promise.all([
+      api().put(`/api/events/subscribeToAnEvent/${a._id}/${event._id}`).set(auth(a.token)),
+      api().put(`/api/events/subscribeToAnEvent/${b._id}/${event._id}`).set(auth(b.token)),
+    ]);
+
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    expect((await findEvent(event._id))!.members).toHaveLength(2);
+  });
+
+  it("el mismo usuario dos veces en simultáneo queda una sola vez", async () => {
+    const organizer = await createUser();
+    const me = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id] });
+    const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
+
+    await Promise.all([
+      api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token)),
+      api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token)),
+    ]);
+
+    expect((await findEvent(event._id))!.members).toEqual([organizer._id, me._id]);
+    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([organizer._id, me._id]);
+  });
+
   it("'lleno' se evalúa antes que el estado", async () => {
     const organizer = await createUser();
     const me = await createUser();

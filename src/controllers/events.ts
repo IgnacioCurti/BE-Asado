@@ -235,6 +235,18 @@ export async function createEvent(
   }
 }
 
+function cannotJoinMessage(
+  event: IEvent,
+  userId: mongoose.Types.ObjectId
+): string | null {
+  if (event.memberLimit <= event.members.length) return "The event is full.";
+  if (event.state !== "available")
+    return "The event is not available for users to join";
+  if (event.members.some((member) => member.equals(userId)))
+    return "The user has already joined the event";
+  return null;
+}
+
 export async function subscribeToAnEvent(
   req: Request,
   res: Response
@@ -244,39 +256,51 @@ export async function subscribeToAnEvent(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided." });
-    const event: IEventWithPurchaseReceipts | null = await Event.findById(
-      req.params.event
-    ).populate("purchaseReceipts");
+    const event: IEvent | null = await Event.findById(req.params.event);
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
-    if (event.memberLimit <= event.members.length)
+    const userId: mongoose.Types.ObjectId = new mongoose.Types.ObjectId(
+      req.params.id
+    );
+    const precheckMessage: string | null = cannotJoinMessage(event, userId);
+    if (precheckMessage)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The event is full." });
-    if (event.state !== "available")
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The event is not available for users to join" });
-    if (event.members.includes(new mongoose.Types.ObjectId(req.params.id))) {
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The user has already joined the event" });
-    }
-    const user: IUser | null = await User.findById(req.params.id);
+        .json({ message: precheckMessage });
+    const user: IUser | null = await User.findById(userId);
     if (!user) {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The user with the given ID was not found." });
     }
-    for (const receipt of event.purchaseReceipts) {
-      receipt.participants.push(user._id);
-      await receipt.save();
+    // The conditions are re-checked atomically so concurrent joins can't
+    // exceed memberLimit or add the same member twice.
+    const joined: IEvent | null = await Event.findOneAndUpdate(
+      {
+        _id: event._id,
+        state: "available",
+        members: { $ne: user._id },
+        $expr: { $lt: [{ $size: "$members" }, "$memberLimit"] },
+      },
+      { $push: { members: user._id } }
+    );
+    if (!joined) {
+      const current: IEvent | null = await Event.findById(event._id);
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message:
+          (current && cannotJoinMessage(current, user._id)) ||
+          "The event is full.",
+      });
     }
-    event.members.push(user._id);
-    await event.save();
-    return res.status(STATUS_CODES.OK).json(event);
+    await PurchaseReceipt.updateMany(
+      { _id: { $in: event.purchaseReceipts } },
+      { $addToSet: { participants: user._id } }
+    );
+    const updatedEvent: IEventWithPurchaseReceipts | null =
+      await Event.findById(event._id).populate("purchaseReceipts");
+    return res.status(STATUS_CODES.OK).json(updatedEvent);
   } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
