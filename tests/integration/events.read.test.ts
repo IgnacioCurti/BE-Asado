@@ -408,17 +408,25 @@ describe("GET /api/events/getMemberIndividualCost/:user/:event", () => {
     return { ana, beto, caro, event };
   }
 
-  it.each(["readyforpayment", "finished"])("en estado %s devuelve la suma de las partes del usuario sin redondear", async (state) => {
+  it.each(["readyforpayment", "finished"])("en estado %s devuelve la suma de las partes del usuario redondeadas a centavos", async (state) => {
     const { ana, caro, event } = await scenario(state);
     const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(ana.token));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ userAmount: 100 / 3 + 25 });
+    expect(res.body).toEqual({ userAmount: 58.33 });
   });
 
   it("solo suma los comprobantes en los que participa el usuario", async () => {
     const { ana, event } = await scenario("finished");
     const res = await api().get(`/api/events/getMemberIndividualCost/${ana._id}/${event._id}`).set(auth(ana.token));
-    expect(res.body).toEqual({ userAmount: 100 / 3 });
+    expect(res.body).toEqual({ userAmount: 33.33 });
+  });
+
+  it("coincide con el costo que usa getMembersAmount", async () => {
+    const { ana, caro, event } = await scenario("readyforpayment");
+    const cost = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(ana.token));
+    const amounts = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const caroTransfer = amounts.body.find((t: any) => t.userId === caro._id);
+    expect(caroTransfer.amount).toBe(cost.body.userAmount);
   });
 
   it("cualquier usuario autenticado puede consultar el costo de otro", async () => {
