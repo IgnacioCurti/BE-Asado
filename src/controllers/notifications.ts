@@ -18,18 +18,39 @@ import {
   IReminder,
 } from "../models/interfaces.js";
 
+// A failed email is logged and skipped so the remaining users still get theirs.
+async function notifyUser(
+  user: IUser,
+  subject: string,
+  message: string,
+  context: string
+): Promise<void> {
+  const email: string = user.alternativeEmail
+    ? user.alternativeEmail
+    : user.email;
+  try {
+    await sendEmail(email, subject, user.name, message);
+    console.log(`Notification sent to ${user.name} (${email}) for ${context}`);
+  } catch (error: any) {
+    console.log(
+      `Error notifying ${user.name} (${email}) for ${context}: ${
+        error?.message || "unknown error"
+      }`
+    );
+  }
+}
+
 export async function notifyNewEvent(eventId: string): Promise<void> {
   try {
     const users: IUser[] = await User.find({ "notifications.newEvent": true });
     const message: string = newEventTemplate(eventId);
 
     for (const user of users) {
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
-      await sendEmail(email, "FoodSpot | Nuevo evento", user.name, message);
-      console.log(
-        `Notification sent to ${user.name} (${email}) for new event ${eventId}`
+      await notifyUser(
+        user,
+        "FoodSpot | Nuevo evento",
+        message,
+        `new event ${eventId}`
       );
     }
   } catch (error: any) {
@@ -53,17 +74,11 @@ export async function notifyEventStart(eventId: string): Promise<void> {
     const message: string = eventStartTemplate(eventId);
     for (const user of event.members) {
       if (!user.notifications.eventStart) continue;
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
-      await sendEmail(
-        email,
+      await notifyUser(
+        user,
         "FoodSpot | Tu evento comienza pronto",
-        user.name,
-        message
-      );
-      console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} start`
+        message,
+        `event ${eventId} start`
       );
     }
   } catch (error: any) {
@@ -87,15 +102,11 @@ export async function notifyPenalizationStart(eventId: string): Promise<void> {
     const message = penalizationStartTemplate(eventId, event.penalization);
     for (const user of debtors) {
       if (!user.notifications.penalizationStart) continue;
-      const email = user.alternativeEmail ? user.alternativeEmail : user.email;
-      await sendEmail(
-        email,
+      await notifyUser(
+        user,
         "FoodSpot | La penalización está por empezar",
-        user.name,
-        message
-      );
-      console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} penalization start`
+        message,
+        `event ${eventId} penalization start`
       );
     }
   } catch (error) {
@@ -125,17 +136,11 @@ export async function notifyPenalizationOneWeek(
 
     for (const user of debtors) {
       if (!user.notifications.penalizationOneWeek) continue;
-      const email: string = user.alternativeEmail
-        ? user.alternativeEmail
-        : user.email;
-      await sendEmail(
-        email,
+      await notifyUser(
+        user,
         "FoodSpot | La penalización ha estado en curso durante una semana",
-        user.name,
-        message
-      );
-      console.log(
-        `Notification sent to ${user.name} (${email}) for event ${eventId} penalization one week`
+        message,
+        `event ${eventId} penalization one week`
       );
     }
   } catch (error: any) {
