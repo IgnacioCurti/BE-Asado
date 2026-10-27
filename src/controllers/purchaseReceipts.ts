@@ -171,8 +171,10 @@ export async function deletePurchaseReceipt(
           "Purchase receipts can only be uploaded or deleted when the event is closed",
       });
     const index: number = event.purchaseReceipts.indexOf(purchaseReceipt._id);
-    event.purchaseReceipts.splice(index, 1);
-    await event.save();
+    if (index !== -1) {
+      event.purchaseReceipts.splice(index, 1);
+      await event.save();
+    }
     await PurchaseReceipt.findByIdAndDelete(req.params.id);
     return res.status(STATUS_CODES.OK).json(purchaseReceipt);
   } catch (error) {

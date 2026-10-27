@@ -377,7 +377,7 @@ describe("DELETE /api/purchaseReceipts/deletePurchaseReceipt/:id/:event", () => 
     expect(await findPurchaseReceipt(foreign._id)).toBeNull();
   });
 
-  it("[BUG - comportamiento actual] si el comprobante no está en la lista del evento, se quita el ÚLTIMO de la lista", async () => {
+  it("si el comprobante no está en la lista del evento, la lista no cambia", async () => {
     const { designee, event } = await closedEventWithDesignee();
     const listed = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 1, participants: [] });
     const unlisted = await createPurchaseReceipt({
@@ -388,7 +388,8 @@ describe("DELETE /api/purchaseReceipts/deletePurchaseReceipt/:id/:event", () => 
       attachToEvent: false,
     });
     await api().delete(`/api/purchaseReceipts/deletePurchaseReceipt/${unlisted._id}/${event._id}`).set(auth(designee.token)).expect(200);
-    expect((await findEvent(event._id))!.purchaseReceipts).toEqual([]);
+    expect((await findEvent(event._id))!.purchaseReceipts).toEqual([listed._id]);
     expect(await findPurchaseReceipt(listed._id)).not.toBeNull();
+    expect(await findPurchaseReceipt(unlisted._id)).toBeNull();
   });
 });
