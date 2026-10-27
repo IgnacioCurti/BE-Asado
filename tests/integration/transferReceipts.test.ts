@@ -4,6 +4,7 @@ import {
   countImages,
   countTransferReceipts,
   createEvent,
+  createImage,
   createPurchaseReceipt,
   createTransferReceipt,
   createUser,
@@ -122,6 +123,18 @@ describe("POST /api/transferReceipts/createTransferReceipt/:event", () => {
     expect(await countTransferReceipts()).toBe(1);
   });
 
+  it("al reemplazar el comprobante se borra la imagen del anterior", async () => {
+    const { ana, beto, event } = await paymentScenario();
+    const oldImage = await createImage();
+    await createTransferReceipt({ event: event._id, user: beto._id, amount: 50, image: oldImage });
+    await api()
+      .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
+      .set(auth(beto.token))
+      .send({ user: beto._id, amount: 100, receiver: ana._id })
+      .expect(201);
+    expect(await findImage(oldImage)).toBeNull();
+  });
+
   it("[comportamiento actual] el reemplazo ocurre aunque el comprobante anterior ya estuviera aprobado", async () => {
     const { beto, event } = await paymentScenario();
     const approved = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, hasPaid: true });
@@ -200,6 +213,19 @@ describe("POST /api/transferReceipts/uploadFile/:transferReceipt", () => {
     expect(res.body).toEqual({ imageId: expect.any(String) });
     expect((await findTransferReceipt(receipt._id))!.image).toBe(res.body.imageId);
     expect((await findImage(res.body.imageId))!.mimetype).toBe(contentType);
+  });
+
+  it("al reemplazar la imagen se borra la anterior", async () => {
+    const { beto, event } = await paymentScenario();
+    const oldImage = await createImage();
+    const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, image: oldImage });
+    const res = await api()
+      .post(`/api/transferReceipts/uploadFile/${receipt._id}`)
+      .set(auth(beto.token))
+      .attach("file", PNG_BYTES, { filename: "t.png", contentType: "image/png" });
+    expect(res.status).toBe(200);
+    expect(await findImage(oldImage)).toBeNull();
+    expect(await countImages()).toBe(1);
   });
 
   it("[comportamiento actual] comprobante inexistente -> 500 y la imagen queda huérfana", async () => {
@@ -385,6 +411,14 @@ describe("DELETE /api/transferReceipts/deleteTransferReceipt/:id", () => {
     expect(res.body).toMatchObject({ _id: receipt._id });
     expect(await findTransferReceipt(receipt._id)).toBeNull();
     expect((await findEvent(event._id))!.transferReceipts).toEqual([keep._id]);
+  });
+
+  it("borra también la imagen del comprobante", async () => {
+    const { beto, event } = await paymentScenario();
+    const image = await createImage();
+    const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, image });
+    await api().delete(`/api/transferReceipts/deleteTransferReceipt/${receipt._id}`).set(auth(beto.token)).expect(200);
+    expect(await findImage(image)).toBeNull();
   });
 
   it("si el comprobante no está en la lista del evento, la lista no cambia", async () => {
