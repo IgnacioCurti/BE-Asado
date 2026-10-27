@@ -228,14 +228,39 @@ describe("POST /api/transferReceipts/uploadFile/:transferReceipt", () => {
     expect(await countImages()).toBe(1);
   });
 
-  it("[comportamiento actual] comprobante inexistente -> 500 y la imagen queda huérfana", async () => {
+  it("comprobante inexistente -> 404 y no guarda la imagen", async () => {
     const user = await createUser();
     const res = await api()
       .post(`/api/transferReceipts/uploadFile/${newId()}`)
       .set(auth(user.token))
       .attach("file", PNG_BYTES, { filename: "t.png", contentType: "image/png" });
-    expect(res.status).toBe(500);
-    expect(await countImages()).toBe(1);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The transfer receipt with the given ID was not found." });
+    expect(await countImages()).toBe(0);
+  });
+
+  it("subir la imagen al comprobante de otro -> 403", async () => {
+    const { beto, caro, event } = await paymentScenario();
+    const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
+    const res = await api()
+      .post(`/api/transferReceipts/uploadFile/${receipt._id}`)
+      .set(auth(caro.token))
+      .attach("file", PNG_BYTES, { filename: "t.png", contentType: "image/png" });
+    expect(res.status).toBe(403);
+    expect((await findTransferReceipt(receipt._id))!.image).toBeNull();
+    expect(await countImages()).toBe(0);
+  });
+
+  it("comprobante ya aprobado -> 400", async () => {
+    const { beto, event } = await paymentScenario();
+    const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, hasPaid: true });
+    const res = await api()
+      .post(`/api/transferReceipts/uploadFile/${receipt._id}`)
+      .set(auth(beto.token))
+      .attach("file", PNG_BYTES, { filename: "t.png", contentType: "image/png" });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "The transfer receipt is already approved." });
+    expect(await countImages()).toBe(0);
   });
 
   it("[comportamiento actual] tipo no permitido -> 500", async () => {

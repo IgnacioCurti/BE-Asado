@@ -16,6 +16,7 @@ import {
   IHasUploadedInfo,
   IMemberWhoHasUploaded,
   IReceiptInfo,
+  IRequestWithUser,
   ITransferInfo,
   ITransferReceipt,
   IUserBalance,
@@ -67,7 +68,7 @@ export async function getTransferReceiptsById(
 }
 
 export async function uploadFileTransferReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
@@ -75,10 +76,21 @@ export async function uploadFileTransferReceipt(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No file was uploaded." });
+    const transferReceipt: ITransferReceipt | null =
+      await TransferReceipt.findById(req.params.transferReceipt);
+    if (!transferReceipt)
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: transferReceiptNotFoundMessage });
+    if (transferReceipt.user.toString() !== req.user._id)
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message: "Access denied. The user is not the owner of the receipt.",
+      });
+    if (transferReceipt.hasPaid)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "The transfer receipt is already approved." });
     const imageId = await saveImage(req.file);
-    const transferReceipt: ITransferReceipt = await TransferReceipt.findById(
-      req.params.transferReceipt
-    );
     const previousImage: mongoose.Types.ObjectId | null | undefined =
       transferReceipt.image;
     transferReceipt.image = imageId;

@@ -71,7 +71,7 @@ export async function getPurchaseReceiptById(
 }
 
 export async function uploadFilePurchaseReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
@@ -79,7 +79,6 @@ export async function uploadFilePurchaseReceipt(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No file was uploaded." });
-    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
     let purchaseReceipt: IPurchaseReceipt | null =
       await PurchaseReceipt.findById(req.params.purchaseReceipt);
     if (!purchaseReceipt) {
@@ -87,6 +86,15 @@ export async function uploadFilePurchaseReceipt(
         message: "The purchase receipt with the given ID was not found.",
       });
     }
+    const event: IEvent | null = await Event.findById(purchaseReceipt.event);
+    const isDesignee: boolean = Boolean(
+      event?.shoppingDesignee.some((id) => id.toString() === req.user._id)
+    );
+    if (!isDesignee)
+      return res
+        .status(STATUS_CODES.FORBIDDEN)
+        .json({ message: "Access denied. User is not a shopping designee." });
+    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
     purchaseReceipt.image = imageId;
     await purchaseReceipt.save();
     return res.status(STATUS_CODES.OK).json({ imageId: imageId });
