@@ -416,6 +416,27 @@ describe("POST /api/transferReceipts/approvePaymentWithoutReceipt/:event/:user",
     expect(res.body).toEqual({ message: "The user has uploaded a transfer receipt" });
   });
 
+  it("usuario que no es miembro del evento -> 400 y no crea nada", async () => {
+    const { ana, event } = await paymentScenario();
+    const outsider = await createUser();
+    const res = await api()
+      .post(`/api/transferReceipts/approvePaymentWithoutReceipt/${event._id}/${outsider._id}`)
+      .set(auth(ana.token))
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "The user is not a member of the event." });
+    expect(await countTransferReceipts()).toBe(0);
+  });
+
+  it(":user mal formado -> 400", async () => {
+    const { ana, event } = await paymentScenario();
+    const res = await api()
+      .post(`/api/transferReceipts/approvePaymentWithoutReceipt/${event._id}/abc`)
+      .set(auth(ana.token))
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
   it("[comportamiento actual] no valida el estado del evento", async () => {
     const { ana, beto, event } = await paymentScenario("closed");
     const res = await api()
