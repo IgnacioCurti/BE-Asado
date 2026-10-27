@@ -37,7 +37,7 @@ const REGISTER_FIELDS: string[] = [
 export async function getUsers(req: Request, res: Response): Promise<Response> {
   try {
     const users: ISafeUser[] = await User.find().select(
-      "-password -verificationCode"
+      "-password -verificationCode -verificationCodeExpiresAt -verificationAttempts"
     );
     return res.status(STATUS_CODES.OK).json(users);
   } catch (error) {
@@ -53,7 +53,7 @@ export async function getUserById(
 ): Promise<Response> {
   try {
     const user: ISafeUser | null = await User.findById(req.params.id).select(
-      "-password -verificationCode"
+      "-password -verificationCode -verificationCodeExpiresAt -verificationAttempts"
     );
     if (!user) {
       return res

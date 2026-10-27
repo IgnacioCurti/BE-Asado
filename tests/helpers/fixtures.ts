@@ -47,6 +47,8 @@ export interface UserFixture {
   alternativeEmail: string | null;
   password: string; // hash
   verificationCode: string | null;
+  verificationCodeExpiresAt: string | Date | null;
+  verificationAttempts: number;
   cbu: string | null;
   alias: string | null;
   specialDiet: string[];
@@ -83,6 +85,9 @@ export async function createUser(
     verificationCode: verificationCodePlain
       ? await bcrypt.hash(verificationCodePlain, 4)
       : rest.verificationCode ?? null,
+    verificationCodeExpiresAt:
+      rest.verificationCodeExpiresAt ??
+      (verificationCodePlain || rest.verificationCode ? new Date(Date.now() + 15 * 60 * 1000) : null),
   });
   const user = plain<UserFixture>(doc);
   return { ...user, token: tokenFor(user), plainPassword };
