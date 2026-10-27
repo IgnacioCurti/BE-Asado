@@ -47,6 +47,18 @@ describe("GET /api/events/getEvents", () => {
     });
   });
 
+  it("a igual fecha desempata por _id ascendente", async () => {
+    const user = await createUser();
+    const lowerId = newId();
+    const higherId = newId();
+    await createEvent({ _id: higherId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
+    await createEvent({ _id: lowerId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
+
+    const res = await api().get("/api/events/getEvents").set(auth(user.token));
+
+    expect(res.body.map((e: any) => e._id)).toEqual([lowerId, higherId]);
+  });
+
   it("devuelve [] si no hay eventos", async () => {
     const user = await createUser();
     const res = await api().get("/api/events/getEvents").set(auth(user.token));
