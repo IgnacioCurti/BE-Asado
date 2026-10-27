@@ -11,7 +11,7 @@ const transferReceiptSchema: mongoose.Schema<ITransferReceipt> =
 
     description: { type: String },
 
-    amount: { type: Number, required: true },
+    amount: { type: Number, required: true, min: 0 },
 
     hasPaid: { type: Boolean, default: false },
 
