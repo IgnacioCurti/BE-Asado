@@ -20,6 +20,20 @@ import mongoose from "mongoose";
 
 const userNotFoundMessage = "The user with the given ID was not found.";
 
+// Fields a client may set when registering. verificationCode and
+// profilePicture are only set by their own flows.
+const REGISTER_FIELDS: string[] = [
+  "name",
+  "lastName",
+  "email",
+  "alternativeEmail",
+  "password",
+  "cbu",
+  "alias",
+  "specialDiet",
+  "notifications",
+];
+
 export async function getUsers(req: Request, res: Response): Promise<Response> {
   try {
     const users: ISafeUser[] = await User.find().select(
@@ -165,7 +179,13 @@ export async function register(req: Request, res: Response): Promise<Response> {
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Password doesn't match the requirements." });
     }
-    let user: IUser = new User(req.body);
+    const fields: Record<string, unknown> = Object.fromEntries(
+      REGISTER_FIELDS.filter((field) => field in req.body).map((field) => [
+        field,
+        req.body[field],
+      ])
+    );
+    let user: IUser = new User(fields);
     const salt: string = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(user.password, salt);
     user = await user.save();
