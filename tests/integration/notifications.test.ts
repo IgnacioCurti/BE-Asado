@@ -77,7 +77,7 @@ describe("GET /api/cron/reminderCheck", () => {
       }
     });
 
-    it("si Brevo falla, el recordatorio se borra igual y deja de notificar al resto", async () => {
+    it("si Brevo falla con un destinatario, igual intenta con el resto y borra el recordatorio", async () => {
       const a = await createUser({ notifications: ALL_ON });
       const b = await createUser({ notifications: ALL_ON });
       const event = await createEvent({ organizer: a._id, members: [a._id, b._id] });
@@ -87,7 +87,7 @@ describe("GET /api/cron/reminderCheck", () => {
       const res = await api().get("/api/cron/reminderCheck");
 
       expect(res.status).toBe(200);
-      expect(sentEmails).toHaveLength(1);
+      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([a.email, b.email]);
       expect(await countReminders()).toBe(0);
     });
 

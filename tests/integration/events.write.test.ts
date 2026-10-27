@@ -214,7 +214,7 @@ describe("POST /api/events/createEvent", () => {
       expect(sentEmails).toHaveLength(0);
     });
 
-    it("si el envío de mails falla, el evento se crea igual (201) y se dejan de notificar los siguientes", async () => {
+    it("si el envío de mails falla, el evento se crea igual (201) y se intenta notificar a todos", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: true } as any });
@@ -223,7 +223,7 @@ describe("POST /api/events/createEvent", () => {
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
 
       expect(res.status).toBe(201);
-      expect(sentEmails).toHaveLength(1);
+      expect(sentEmails).toHaveLength(2);
       expect(await findReminders(res.body._id)).toHaveLength(1);
     });
   });
