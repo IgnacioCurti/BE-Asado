@@ -141,13 +141,29 @@ describe("POST /api/events/createEvent", () => {
     }
   );
 
-  it("[comportamiento actual] estado inválido -> 500", async () => {
+  it("ignora los campos que administra el backend (state, comprobantes, ratings, opciones)", async () => {
     const organizer = await createUser();
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { state: "abierto" }));
-    expect(res.status).toBe(500);
+      .send(
+        eventBody(organizer, {
+          state: "finished",
+          purchaseReceipts: [newId()],
+          transferReceipts: [newId()],
+          ratings: [newId()],
+          options: [newId()],
+        })
+      );
+    expect(res.status).toBe(201);
+    const saved = await findEvent(res.body._id);
+    expect(saved).toMatchObject({
+      state: "available",
+      purchaseReceipts: [],
+      transferReceipts: [],
+      ratings: [],
+      options: [],
+    });
   });
 
   describe("recordatorios", () => {

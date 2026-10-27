@@ -217,12 +217,33 @@ async function updateReminders(event: IEvent): Promise<void> {
   }
 }
 
+// Fields a client may set when creating an event. State and the related
+// collections (receipts, ratings, options) are managed by the backend.
+const CREATE_EVENT_FIELDS: string[] = [
+  "title",
+  "datetime",
+  "description",
+  "memberLimit",
+  "members",
+  "organizer",
+  "shoppingDesignee",
+  "isPrivate",
+  "penalization",
+  "penalizationStartDate",
+];
+
 export async function createEvent(
   req: Request,
   res: Response
 ): Promise<Response> {
   try {
-    let event: IEvent = new Event(req.body);
+    const fields: Record<string, unknown> = Object.fromEntries(
+      CREATE_EVENT_FIELDS.filter((field) => field in req.body).map((field) => [
+        field,
+        req.body[field],
+      ])
+    );
+    let event: IEvent = new Event(fields);
     event.chef = req.body.isChef ? req.body.organizer : null;
     if (req.body.isShoppingDesignee)
       event.shoppingDesignee.push(req.body.organizer);
