@@ -5,6 +5,7 @@ import { User } from "../models/user.js";
 import { Reminder } from "../models/reminder.js";
 import { getEventsDebtors } from "../utils/utils.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { nowArgentina } from "../utils/dates.js";
 import {
   eventStartTemplate,
   newEventTemplate,
@@ -153,10 +154,8 @@ export async function reminderCheck(
   res: Response
 ): Promise<Response> {
   try {
-    const date: Date = new Date();
-    date.setHours(date.getHours() - 3);
     const reminders: IReminder[] = await Reminder.find({
-      datetime: { $lte: date },
+      datetime: { $lte: nowArgentina() },
     });
     for (const reminder of reminders) {
       const eventId: string = reminder.event.toString();
