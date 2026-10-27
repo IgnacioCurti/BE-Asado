@@ -42,7 +42,6 @@ describe("User schema", () => {
   it("aplica los defaults", () => {
     const user = new User(valid());
     expect(user.lastName).toBeUndefined();
-    expect(user.alternativeEmail).toBeNull();
     expect(user.verificationCode).toBeNull();
     expect(user.cbu).toBeNull();
     expect(user.alias).toBeNull();
@@ -57,35 +56,37 @@ describe("User schema", () => {
   });
 
   describe("email", () => {
-    it.each(["ana@endava.com", "ana.perez+tag@endava.com", "davidmartingallegos@gmail.com"])("acepta %s", (email) => {
+    it.each([
+      "ana@endava.com",
+      "ana.perez+tag@endava.com",
+      "ana@gmail.com",
+      "ana@mail.endava.com",
+      "ana@ENDAVA.COM",
+    ])("acepta %s (cualquier dominio)", (email) => {
       expect(errorsOf(new User({ ...valid(), email }))).toEqual([]);
     });
 
     it.each([
-      ["otro dominio", "ana@gmail.com"],
-      ["subdominio", "ana@mail.endava.com"],
-      ["dominio en mayúsculas (el schema no normaliza)", "ana@ENDAVA.COM"],
       ["sin arroba", "anaendava.com"],
       ["dos arrobas", "ana@x@endava.com"],
+      ["sin parte local", "@endava.com"],
+      ["dominio sin punto", "ana@endava"],
+      ["con espacios", "ana perez@endava.com"],
       ["string vacío", ""],
     ])("rechaza %s", (_label, email) => {
       expect(errorsOf(new User({ ...valid(), email }))).toContain("email");
     });
 
-    it("el mensaje de error menciona que no es un email de endava", () => {
-      const error = new User({ ...valid(), email: "ana@gmail.com" }).validateSync();
-      expect(error?.errors.email.message).toBe("ana@gmail.com is not a valid endava email.");
+    it("el mensaje de error es genérico", () => {
+      const error = new User({ ...valid(), email: "ana@endava" }).validateSync();
+      expect(error?.errors.email.message).toBe("ana@endava is not a valid email.");
     });
   });
 
-  describe("alternativeEmail", () => {
-    it.each([null, "ana@gmail.com", "cualquier-texto-sin-arroba"])("acepta %s", (alternativeEmail) => {
-      expect(errorsOf(new User({ ...valid(), alternativeEmail }))).toEqual([]);
-    });
-
-    it("rechaza un email con más de una arroba", () => {
-      expect(errorsOf(new User({ ...valid(), alternativeEmail: "a@b@c.com" }))).toEqual(["alternativeEmail"]);
-    });
+  it("alternativeEmail ya no es parte del schema: se ignora", () => {
+    const user = new User({ ...valid(), alternativeEmail: "ana@gmail.com" });
+    expect(errorsOf(user)).toEqual([]);
+    expect(user.toObject()).not.toHaveProperty("alternativeEmail");
   });
 
   describe("specialDiet", () => {
@@ -161,11 +162,11 @@ describe("Event schema", () => {
   });
 
   it.each(["available", "closed", "readyforpayment", "cancelled", "finished", "CLOSED", "ReadyForPayment"])(
-    "acepta el estado %s (sin importar mayúsculas)",
+    "acepta el estado %s (sin importar mayúsculas) y lo guarda en minúsculas",
     (state) => {
       const event = new Event({ ...valid(), state });
       expect(errorsOf(event)).toEqual([]);
-      expect(event.state).toBe(state); // no normaliza
+      expect(event.state).toBe(state.toLowerCase());
     }
   );
 
@@ -178,6 +179,15 @@ describe("Event schema", () => {
     expect(errorsOf(event)).toEqual([]);
     expect(event.memberLimit).toBe(8);
     expect(event.datetime).toEqual(new Date("2030-05-01T10:00:00.000Z"));
+  });
+
+  it.each([0, -3])("rechaza memberLimit %d (mínimo 1)", (memberLimit) => {
+    expect(errorsOf(new Event({ ...valid(), memberLimit }))).toEqual(["memberLimit"]);
+  });
+
+  it("rechaza una penalización negativa y acepta 0", () => {
+    expect(errorsOf(new Event({ ...valid(), penalization: -1 }))).toEqual(["penalization"]);
+    expect(errorsOf(new Event({ ...valid(), penalization: 0 }))).toEqual([]);
   });
 
   it("rechaza memberLimit no numérico y fechas inválidas", () => {
@@ -204,11 +214,11 @@ describe("Rating schema", () => {
 });
 
 describe("Reminder schema", () => {
-  it.each(["eventStart", "penalizationStart", "penalizationOneWeek"])("acepta el tipo %s", (type) => {
+  it.each(["newEvent", "eventStart", "penalizationStart", "penalizationOneWeek"])("acepta el tipo %s", (type) => {
     expect(errorsOf(new Reminder({ event: oid(), datetime: new Date(), type }))).toEqual([]);
   });
 
-  it.each(["eventstart", "newEvent", ""])("rechaza el tipo %j (sensible a mayúsculas)", (type) => {
+  it.each(["eventstart", "newevent", ""])("rechaza el tipo %j (sensible a mayúsculas)", (type) => {
     expect(errorsOf(new Reminder({ event: oid(), datetime: new Date(), type }))).toEqual(["type"]);
   });
 
@@ -231,6 +241,12 @@ describe("TransferReceipt schema", () => {
     expect(receipt.receiver).toBeNull();
     expect(receipt.description).toBeUndefined();
   });
+
+  it("rechaza un monto negativo y acepta 0 (pago aprobado sin comprobante)", () => {
+    const base = { user: oid(), event: oid(), datetime: new Date() };
+    expect(errorsOf(new TransferReceipt({ ...base, amount: -1 }))).toEqual(["amount"]);
+    expect(errorsOf(new TransferReceipt({ ...base, amount: 0 }))).toEqual([]);
+  });
 });
 
 describe("PurchaseReceipt schema", () => {
@@ -249,6 +265,12 @@ describe("PurchaseReceipt schema", () => {
     expect(
       errorsOf(new PurchaseReceipt({ description: "", amount: 10, event: oid(), shoppingDesignee: oid() }))
     ).toEqual(["description"]);
+  });
+
+  it("rechaza un monto negativo", () => {
+    expect(
+      errorsOf(new PurchaseReceipt({ description: "Carne", amount: -10, event: oid(), shoppingDesignee: oid() }))
+    ).toEqual(["amount"]);
   });
 });
 

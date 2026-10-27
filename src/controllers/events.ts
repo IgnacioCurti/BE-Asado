@@ -9,7 +9,7 @@ import { Rating } from "../models/rating.js";
 import { Reminder } from "../models/reminder.js";
 import { membersWhoHaveUploaded } from "./transferReceipts.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
-import { notifyNewEvent } from "./notifications.js";
+import { nowArgentina } from "../utils/dates.js";
 import {
   IEvent,
   IEventAmountCalculations,
@@ -33,13 +33,18 @@ const eventNotFoundMessage: string =
   "The event with the given ID was not found.";
 
 export async function getEvents(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    const events: IEvent[] = await Event.find().sort({
+    const events: IEvent[] = await Event.find({
+      $or: [
+        { isPrivate: { $ne: true } },
+        { isPrivate: true, members: req.user._id },
+      ],
+    }).sort({
       datetime: -1,
-      ":id": 1,
+      _id: 1,
     });
     return res.json(events);
   } catch (error: any) {
@@ -160,81 +165,98 @@ export async function getMembersAndReceiptsInfo(
   }
 }
 
+// A missing reminder was either never needed or already sent (reminderCheck
+// deletes them), so only create the ones that are still due in the future.
+async function upsertReminder(
+  reminders: IReminder[],
+  event: IEvent,
+  type: IReminder["type"],
+  datetime: Date
+): Promise<void> {
+  const existing: IReminder | undefined = reminders.find(
+    (reminder) => reminder.type === type
+  );
+  if (existing) {
+    existing.datetime = datetime;
+    await existing.save();
+    return;
+  }
+  if (datetime <= nowArgentina()) return;
+  await new Reminder({ event: event._id, type, datetime }).save();
+}
+
 async function updateReminders(event: IEvent): Promise<void> {
   const reminders: IReminder[] = await Reminder.find({ event: event._id });
-  const eventStartReminder: IReminder | undefined = reminders.find(
-    (reminder) => reminder.type === "eventStart"
+  await upsertReminder(
+    reminders,
+    event,
+    "eventStart",
+    new Date(event.datetime.getTime() - 30 * 60 * 1000)
   );
-  if (eventStartReminder) {
-    eventStartReminder.datetime = new Date(
-      event.datetime.getTime() - 30 * 60 * 1000
-    );
-    await eventStartReminder.save();
-  } else {
-    const newEventStartReminder: IReminder = new Reminder({
-      event: event._id,
-      type: "eventStart",
-      datetime: new Date(event.datetime.getTime() - 30 * 60 * 1000),
-    });
-    await newEventStartReminder.save();
-  }
 
   if (event.penalizationStartDate && event.penalization > 0) {
     const penalizationReminderDate: Date = new Date(
       event.penalizationStartDate
     );
-    penalizationReminderDate.setDate(penalizationReminderDate.getDate() - 1);
-    penalizationReminderDate.setHours(20, 0, 0, 0); // 8 PM the day before penalization starts
-
-    const penalizationStartReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationStart"
+    penalizationReminderDate.setUTCDate(
+      penalizationReminderDate.getUTCDate() - 1
     );
-
-    if (penalizationStartReminder) {
-      penalizationStartReminder.datetime = penalizationReminderDate;
-      await penalizationStartReminder.save();
-    } else {
-      const newPenalizationStartReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationStart",
-        datetime: penalizationReminderDate,
-      });
-      await newPenalizationStartReminder.save();
-    }
-
-    const penalizationOneWeekReminderDate: Date = new Date(
-      penalizationReminderDate.getTime() + 7 * 24 * 60 * 60 * 1000
+    penalizationReminderDate.setUTCHours(20, 0, 0, 0); // 8 PM (Argentina) the day before penalization starts
+    await upsertReminder(
+      reminders,
+      event,
+      "penalizationStart",
+      penalizationReminderDate
     );
-    const penalizationOneWeekReminder: IReminder | undefined = reminders.find(
-      (reminder) => reminder.type === "penalizationOneWeek"
+    await upsertReminder(
+      reminders,
+      event,
+      "penalizationOneWeek",
+      new Date(penalizationReminderDate.getTime() + 7 * 24 * 60 * 60 * 1000)
     );
-    if (penalizationOneWeekReminder) {
-      penalizationOneWeekReminder.datetime = penalizationOneWeekReminderDate;
-      await penalizationOneWeekReminder.save();
-    } else {
-      const newPenalizationOneWeekReminder: IReminder = new Reminder({
-        event: event._id,
-        type: "penalizationOneWeek",
-        datetime: penalizationOneWeekReminderDate,
-      });
-      await newPenalizationOneWeekReminder.save();
-    }
   }
 }
+
+// Fields a client may set when creating an event. State and the related
+// collections (receipts, ratings, options) are managed by the backend.
+const CREATE_EVENT_FIELDS: string[] = [
+  "title",
+  "datetime",
+  "description",
+  "memberLimit",
+  "members",
+  "organizer",
+  "shoppingDesignee",
+  "isPrivate",
+  "penalization",
+  "penalizationStartDate",
+];
 
 export async function createEvent(
   req: Request,
   res: Response
 ): Promise<Response> {
   try {
-    let event: IEvent = new Event(req.body);
+    const fields: Record<string, unknown> = Object.fromEntries(
+      CREATE_EVENT_FIELDS.filter((field) => field in req.body).map((field) => [
+        field,
+        req.body[field],
+      ])
+    );
+    let event: IEvent = new Event(fields);
     event.chef = req.body.isChef ? req.body.organizer : null;
     if (req.body.isShoppingDesignee)
       event.shoppingDesignee.push(req.body.organizer);
     event = await event.save();
     await deleteEvents();
     if (!event.isPrivate) {
-      await notifyNewEvent(event.id);
+      // Sent by the next reminderCheck run, so creating the event doesn't
+      // wait for one email per subscribed user.
+      await new Reminder({
+        event: event._id,
+        type: "newEvent",
+        datetime: nowArgentina(),
+      }).save();
     }
     await updateReminders(event);
     return res.status(STATUS_CODES.CREATED).json(event);
@@ -243,6 +265,18 @@ export async function createEvent(
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
       .json({ message: error?.message || "Internal server error" });
   }
+}
+
+function cannotJoinMessage(
+  event: IEvent,
+  userId: mongoose.Types.ObjectId
+): string | null {
+  if (event.memberLimit <= event.members.length) return "The event is full.";
+  if (event.state !== "available")
+    return "The event is not available for users to join";
+  if (event.members.some((member) => member.equals(userId)))
+    return "The user has already joined the event";
+  return null;
 }
 
 export async function subscribeToAnEvent(
@@ -254,39 +288,51 @@ export async function subscribeToAnEvent(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "No event ID provided." });
-    const event: IEventWithPurchaseReceipts | null = await Event.findById(
-      req.params.event
-    ).populate("purchaseReceipts");
+    const event: IEvent | null = await Event.findById(req.params.event);
     if (!event)
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
-    if (event.memberLimit <= event.members.length)
+    const userId: mongoose.Types.ObjectId = new mongoose.Types.ObjectId(
+      req.params.id
+    );
+    const precheckMessage: string | null = cannotJoinMessage(event, userId);
+    if (precheckMessage)
       return res
         .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The event is full." });
-    if (event.state !== "available")
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The event is not available for users to join" });
-    if (event.members.includes(new mongoose.Types.ObjectId(req.params.id))) {
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "The user has already joined the event" });
-    }
-    const user: IUser | null = await User.findById(req.params.id);
+        .json({ message: precheckMessage });
+    const user: IUser | null = await User.findById(userId);
     if (!user) {
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The user with the given ID was not found." });
     }
-    for (const receipt of event.purchaseReceipts) {
-      receipt.participants.push(user._id);
-      await receipt.save();
+    // The conditions are re-checked atomically so concurrent joins can't
+    // exceed memberLimit or add the same member twice.
+    const joined: IEvent | null = await Event.findOneAndUpdate(
+      {
+        _id: event._id,
+        state: "available",
+        members: { $ne: user._id },
+        $expr: { $lt: [{ $size: "$members" }, "$memberLimit"] },
+      },
+      { $push: { members: user._id } }
+    );
+    if (!joined) {
+      const current: IEvent | null = await Event.findById(event._id);
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message:
+          (current && cannotJoinMessage(current, user._id)) ||
+          "The event is full.",
+      });
     }
-    event.members.push(user._id);
-    await event.save();
-    return res.status(STATUS_CODES.OK).json(event);
+    await PurchaseReceipt.updateMany(
+      { _id: { $in: event.purchaseReceipts } },
+      { $addToSet: { participants: user._id } }
+    );
+    const updatedEvent: IEventWithPurchaseReceipts | null =
+      await Event.findById(event._id).populate("purchaseReceipts");
+    return res.status(STATUS_CODES.OK).json(updatedEvent);
   } catch (error: any) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
@@ -372,6 +418,34 @@ export async function editRoles(
   }
 }
 
+// States an event can be moved to through editEvent. "finished" is only set
+// by the system once every payment is approved; cancelled/finished are final.
+const ALLOWED_STATE_TRANSITIONS: Record<string, string[]> = {
+  available: ["closed", "cancelled"],
+  closed: ["available", "readyforpayment", "cancelled"],
+  readyforpayment: ["closed"],
+  cancelled: [],
+  finished: [],
+};
+
+async function stateTransitionError(
+  event: IEvent,
+  nextState: string
+): Promise<string | null> {
+  const currentState: string = event.state;
+  if (nextState === currentState) return null;
+  if (!ALLOWED_STATE_TRANSITIONS[currentState]?.includes(nextState))
+    return `Cannot change the event state from "${currentState}" to "${nextState}".`;
+  if (nextState === "readyforpayment" && event.purchaseReceipts.length === 0)
+    return "The event needs at least one purchase receipt to be ready for payment.";
+  if (
+    currentState === "readyforpayment" &&
+    (await TransferReceipt.exists({ event: event._id, hasPaid: true }))
+  )
+    return "The event can't go back to closed because some payments were already approved.";
+  return null;
+}
+
 export async function editEvent(
   req: Request,
   res: Response
@@ -382,6 +456,14 @@ export async function editEvent(
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
+    const transitionError: string | null = await stateTransitionError(
+      event,
+      String(req.body.state ?? "").toLowerCase()
+    );
+    if (transitionError)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: transitionError });
     event.title = req.body.title;
     event.datetime = req.body.datetime;
     event.description = req.body.description;
@@ -396,7 +478,11 @@ export async function editEvent(
         message: "The event has no shopping designees.",
       });
     await event.save();
-    await updateReminders(event);
+    if (event.state === "cancelled") {
+      await deleteReminders(event._id);
+    } else {
+      await updateReminders(event);
+    }
     return res.status(STATUS_CODES.OK).json(event);
   } catch (error: any) {
     return res
@@ -672,7 +758,7 @@ export async function getMembersAmount(
 }
 
 export async function getMemberIndividualCost(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
@@ -691,6 +777,14 @@ export async function getMemberIndividualCost(
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: eventNotFoundMessage });
+    const canSeeOthers: boolean =
+      event.organizer.toString() === req.user._id ||
+      event.shoppingDesignee.some((id) => id.toString() === req.user._id);
+    if (req.params.user !== req.user._id && !canSeeOthers)
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message:
+          "Access denied. Only the event's organizer or shopping designees can see other members' costs.",
+      });
     if (!event.members.includes(new mongoose.Types.ObjectId(req.params.user)))
       return res
         .status(STATUS_CODES.FORBIDDEN)
@@ -709,11 +803,16 @@ export async function getMemberIndividualCost(
         )
     );
 
+    // Same per-receipt rounding as assignEventValues, so this matches the
+    // amounts shown by getMembersAmount.
     const userAmount: number = userReceipts.reduce(
-      (total: number, receipt: IPurchaseReceipt) => {
-        total += receipt.amount / receipt.participants.length;
-        return total;
-      },
+      (total: number, receipt: IPurchaseReceipt) =>
+        Number(
+          (
+            total +
+            Number((receipt.amount / receipt.participants.length).toFixed(2))
+          ).toFixed(2)
+        ),
       0
     );
 

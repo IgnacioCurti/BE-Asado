@@ -140,6 +140,27 @@ describe("POST /api/purchaseReceipts/createPurchaseReceipt/:event", () => {
     expect(res.body.participants).toEqual([member._id]);
   });
 
+  it("un participante que no es miembro del evento -> 400 y no crea nada", async () => {
+    const { designee, member, outsider, event } = await closedEventWithDesignee();
+    const res = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(designee.token))
+      .send({ description: "Bebidas", amount: 500, participants: [member._id, outsider._id] });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "All participants must be members of the event." });
+    expect(await countPurchaseReceipts()).toBe(0);
+  });
+
+  it("ignora image y otros campos del body", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const res = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(designee.token))
+      .send({ description: "Carne", amount: 100, image: newId() });
+    expect(res.status).toBe(201);
+    expect(res.body.image).toBeNull();
+  });
+
   it("[comportamiento actual] una lista vacía de participantes se respeta (no usa los miembros)", async () => {
     const { designee, event } = await closedEventWithDesignee();
     const res = await api()
@@ -291,7 +312,19 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
     expect(await countImages()).toBe(2);
   });
 
-  it("[comportamiento actual] comprobante inexistente -> 404, pero la imagen queda guardada", async () => {
+  it("[comportamiento actual] un archivo de más de 5 MB se rechaza (500 de multer) y no se guarda", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const receipt = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [] });
+    const big = Buffer.concat([PNG_BYTES, Buffer.alloc(5 * 1024 * 1024)]);
+    const res = await api()
+      .post(`/api/purchaseReceipts/uploadFile/${receipt._id}`)
+      .set(auth(designee.token))
+      .attach("file", big, { filename: "big.png", contentType: "image/png" });
+    expect(res.status).toBe(500);
+    expect(await countImages()).toBe(0);
+  });
+
+  it("comprobante inexistente -> 404 y no guarda la imagen", async () => {
     const user = await createUser();
     const res = await api()
       .post(`/api/purchaseReceipts/uploadFile/${newId()}`)
@@ -299,7 +332,19 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
       .attach("file", PNG_BYTES, { filename: "n.png", contentType: "image/png" });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "The purchase receipt with the given ID was not found." });
-    expect(await countImages()).toBe(1);
+    expect(await countImages()).toBe(0);
+  });
+
+  it("quien no es comprador del evento -> 403", async () => {
+    const { designee, member, event } = await closedEventWithDesignee();
+    const receipt = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [] });
+    const res = await api()
+      .post(`/api/purchaseReceipts/uploadFile/${receipt._id}`)
+      .set(auth(member.token))
+      .attach("file", PNG_BYTES, { filename: "n.png", contentType: "image/png" });
+    expect(res.status).toBe(403);
+    expect((await findPurchaseReceipt(receipt._id))!.image).toBeNull();
+    expect(await countImages()).toBe(0);
   });
 
   it("[comportamiento actual] tipo de archivo no permitido -> 500", async () => {
@@ -313,11 +358,12 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
     expect(await countImages()).toBe(0);
   });
 
-  it("[BUG - comportamiento actual] sin archivo el servidor nunca responde", async () => {
+  it("sin archivo -> 400", async () => {
     const user = await createUser();
-    await expect(
-      api().post(`/api/purchaseReceipts/uploadFile/${newId()}`).set(auth(user.token)).timeout(700)
-    ).rejects.toThrow(/timeout/i);
+    const res = await api().post(`/api/purchaseReceipts/uploadFile/${newId()}`).set(auth(user.token));
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "No file was uploaded." });
+    expect(await countImages()).toBe(0);
   });
 });
 
@@ -376,7 +422,7 @@ describe("DELETE /api/purchaseReceipts/deletePurchaseReceipt/:id/:event", () => 
     expect(await findPurchaseReceipt(foreign._id)).toBeNull();
   });
 
-  it("[BUG - comportamiento actual] si el comprobante no está en la lista del evento, se quita el ÚLTIMO de la lista", async () => {
+  it("si el comprobante no está en la lista del evento, la lista no cambia", async () => {
     const { designee, event } = await closedEventWithDesignee();
     const listed = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 1, participants: [] });
     const unlisted = await createPurchaseReceipt({
@@ -387,7 +433,8 @@ describe("DELETE /api/purchaseReceipts/deletePurchaseReceipt/:id/:event", () => 
       attachToEvent: false,
     });
     await api().delete(`/api/purchaseReceipts/deletePurchaseReceipt/${unlisted._id}/${event._id}`).set(auth(designee.token)).expect(200);
-    expect((await findEvent(event._id))!.purchaseReceipts).toEqual([]);
+    expect((await findEvent(event._id))!.purchaseReceipts).toEqual([listed._id]);
     expect(await findPurchaseReceipt(listed._id)).not.toBeNull();
+    expect(await findPurchaseReceipt(unlisted._id)).toBeNull();
   });
 });

@@ -6,9 +6,10 @@ export interface IUser extends Document {
   name: string;
   lastName?: string;
   email: string;
-  alternativeEmail?: string | null;
   password: string;
   verificationCode?: string | null;
+  verificationCodeExpiresAt?: Date | null;
+  verificationAttempts?: number;
   cbu?: string | null;
   alias?: string | null;
   specialDiet: string[];
@@ -24,7 +25,13 @@ export interface IUser extends Document {
 }
 
 export interface ISafeUser
-  extends Omit<IUser, "password" | "verificationCode"> {}
+  extends Omit<
+    IUser,
+    | "password"
+    | "verificationCode"
+    | "verificationCodeExpiresAt"
+    | "verificationAttempts"
+  > {}
 
 export interface IUserName extends Pick<IUser, "_id" | "name" | "lastName"> {}
 

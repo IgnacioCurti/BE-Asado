@@ -28,11 +28,13 @@ const PUBLIC_EVENT_KEYS = [
 ].sort();
 
 describe("GET /api/events/getEvents", () => {
-  it("devuelve todos los eventos (públicos y privados) ordenados por fecha descendente, sin poblar", async () => {
+  it("devuelve los públicos y los privados de los que es miembro, ordenados por fecha descendente, sin poblar", async () => {
     const user = await createUser();
+    const stranger = await createUser();
     const old = await createEvent({ organizer: user._id, title: "viejo", datetime: "2029-01-01T00:00:00Z" });
     const priv = await createEvent({ organizer: user._id, title: "privado", isPrivate: true, datetime: "2031-01-01T00:00:00Z" });
     const mid = await createEvent({ organizer: user._id, title: "medio", datetime: "2030-01-01T00:00:00Z" });
+    await createEvent({ organizer: stranger._id, title: "privado ajeno", isPrivate: true, datetime: "2032-01-01T00:00:00Z" });
 
     const res = await api().get("/api/events/getEvents").set(auth(user.token));
 
@@ -45,6 +47,18 @@ describe("GET /api/events/getEvents", () => {
       isPrivate: true,
       state: "available",
     });
+  });
+
+  it("a igual fecha desempata por _id ascendente", async () => {
+    const user = await createUser();
+    const lowerId = newId();
+    const higherId = newId();
+    await createEvent({ _id: higherId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
+    await createEvent({ _id: lowerId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
+
+    const res = await api().get("/api/events/getEvents").set(auth(user.token));
+
+    expect(res.body.map((e: any) => e._id)).toEqual([lowerId, higherId]);
   });
 
   it("devuelve [] si no hay eventos", async () => {
@@ -396,24 +410,56 @@ describe("GET /api/events/getMemberIndividualCost/:user/:event", () => {
     return { ana, beto, caro, event };
   }
 
-  it.each(["readyforpayment", "finished"])("en estado %s devuelve la suma de las partes del usuario sin redondear", async (state) => {
+  it.each(["readyforpayment", "finished"])("en estado %s devuelve la suma de las partes del usuario redondeadas a centavos", async (state) => {
     const { ana, caro, event } = await scenario(state);
     const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(ana.token));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ userAmount: 100 / 3 + 25 });
+    expect(res.body).toEqual({ userAmount: 58.33 });
   });
 
   it("solo suma los comprobantes en los que participa el usuario", async () => {
     const { ana, event } = await scenario("finished");
     const res = await api().get(`/api/events/getMemberIndividualCost/${ana._id}/${event._id}`).set(auth(ana.token));
-    expect(res.body).toEqual({ userAmount: 100 / 3 });
+    expect(res.body).toEqual({ userAmount: 33.33 });
   });
 
-  it("cualquier usuario autenticado puede consultar el costo de otro", async () => {
+  it("coincide con el costo que usa getMembersAmount", async () => {
+    const { ana, caro, event } = await scenario("readyforpayment");
+    const cost = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(ana.token));
+    const amounts = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const caroTransfer = amounts.body.find((t: any) => t.userId === caro._id);
+    expect(caroTransfer.amount).toBe(cost.body.userAmount);
+  });
+
+  it("cada miembro puede consultar su propio costo", async () => {
+    const { caro, event } = await scenario("finished");
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(caro.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("un miembro que no es organizador ni comprador no puede ver el costo de otro -> 403", async () => {
+    const { beto, caro, event } = await scenario("finished");
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(beto.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("un comprador puede ver el costo de otro miembro", async () => {
+    const { ana, beto, caro } = await scenario("finished");
+    const event = await createEvent({
+      organizer: ana._id,
+      members: [ana._id, beto._id, caro._id],
+      shoppingDesignee: [beto._id],
+      state: "finished",
+    });
+    const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(beto.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("un usuario ajeno al evento -> 403", async () => {
     const { caro, event } = await scenario("finished");
     const stranger = await createUser();
     const res = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(stranger.token));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
   it("sin comprobantes devuelve 0", async () => {

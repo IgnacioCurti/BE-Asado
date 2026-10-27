@@ -108,21 +108,17 @@ async function getEventsDebtors(eventId: string): Promise<IUser[]> {
     (t) => t.receiver !== null
   );
 
-  const debtorUsers: (IUser | null)[] = await Promise.all(
-    expectedTransfers.map(async (transfer) => {
+  const debtors: IUser[] = expectedTransfers
+    .filter((transfer) => {
       const receipt = event.transferReceipts.find((r) =>
         r.user._id.equals(transfer.userId)
       );
-      if (!receipt) {
-        return receipt.user;
-      }
-      return null;
+      return !receipt || !receipt.hasPaid;
     })
-  );
-
-  const debtors: IUser[] = debtorUsers.filter(
-    (user): user is IUser => user !== null
-  );
+    .map((transfer) =>
+      event.members.find((member) => member._id.equals(transfer.userId))
+    )
+    .filter((user): user is IUser => user !== undefined);
   return debtors;
 }
 

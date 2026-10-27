@@ -71,23 +71,33 @@ export async function getPurchaseReceiptById(
 }
 
 export async function uploadFilePurchaseReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    if (req.file) {
-      const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
-      let purchaseReceipt: IPurchaseReceipt | null =
-        await PurchaseReceipt.findById(req.params.purchaseReceipt);
-      if (!purchaseReceipt) {
-        return res.status(STATUS_CODES.NOT_FOUND).json({
-          message: "The purchase receipt with the given ID was not found.",
-        });
-      }
-      purchaseReceipt.image = imageId;
-      await purchaseReceipt.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
+    if (!req.file)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "No file was uploaded." });
+    let purchaseReceipt: IPurchaseReceipt | null =
+      await PurchaseReceipt.findById(req.params.purchaseReceipt);
+    if (!purchaseReceipt) {
+      return res.status(STATUS_CODES.NOT_FOUND).json({
+        message: "The purchase receipt with the given ID was not found.",
+      });
     }
+    const event: IEvent | null = await Event.findById(purchaseReceipt.event);
+    const isDesignee: boolean = Boolean(
+      event?.shoppingDesignee.some((id) => id.toString() === req.user._id)
+    );
+    if (!isDesignee)
+      return res
+        .status(STATUS_CODES.FORBIDDEN)
+        .json({ message: "Access denied. User is not a shopping designee." });
+    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+    purchaseReceipt.image = imageId;
+    await purchaseReceipt.save();
+    return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
@@ -106,14 +116,25 @@ export async function createPurchaseReceipt(
         message:
           "Purchase receipts can only be uploaded when the event is closed",
       });
-    let purchaseReceipt: IPurchaseReceipt = new PurchaseReceipt(req.body);
+    const participants: unknown[] = req.body.participants ?? event.members;
+    const allMembers: boolean =
+      Array.isArray(participants) &&
+      participants.every((participant) =>
+        event.members.some((member) => member.equals(String(participant)))
+      );
+    if (!allMembers)
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "All participants must be members of the event.",
+      });
+    let purchaseReceipt: IPurchaseReceipt = new PurchaseReceipt({
+      description: req.body.description,
+      amount: req.body.amount,
+    });
     purchaseReceipt.event = event._id;
     purchaseReceipt.shoppingDesignee = new mongoose.Types.ObjectId(
       req.user._id
     );
-    purchaseReceipt.participants = req.body.participants
-      ? req.body.participants
-      : event.members;
+    purchaseReceipt.participants = participants as mongoose.Types.ObjectId[];
     purchaseReceipt = await purchaseReceipt.save();
     event.purchaseReceipts.push(purchaseReceipt._id);
     await event.save();
@@ -169,8 +190,10 @@ export async function deletePurchaseReceipt(
           "Purchase receipts can only be uploaded or deleted when the event is closed",
       });
     const index: number = event.purchaseReceipts.indexOf(purchaseReceipt._id);
-    event.purchaseReceipts.splice(index, 1);
-    await event.save();
+    if (index !== -1) {
+      event.purchaseReceipts.splice(index, 1);
+      await event.save();
+    }
     await PurchaseReceipt.findByIdAndDelete(req.params.id);
     return res.status(STATUS_CODES.OK).json(purchaseReceipt);
   } catch (error) {

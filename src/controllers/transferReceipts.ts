@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
 import { TransferReceipt } from "../models/transferReceipt.js";
 import { Event } from "../models/event.js";
+import { Image } from "../models/image.js";
 import { saveImage } from "./images.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { nowArgentina } from "../utils/dates.js";
 import {
   assignEventValues,
   calculateTransfersInfo,
@@ -15,11 +17,13 @@ import {
   IHasUploadedInfo,
   IMemberWhoHasUploaded,
   IReceiptInfo,
+  IRequestWithUser,
   ITransferInfo,
   ITransferReceipt,
   IUserBalance,
 } from "../models/interfaces.js";
 import mongoose from "mongoose";
+import { isValidId } from "../utils/utils.js";
 
 const transferReceiptNotFoundMessage: string =
   "The transfer receipt with the given ID was not found.";
@@ -66,19 +70,35 @@ export async function getTransferReceiptsById(
 }
 
 export async function uploadFileTransferReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    if (req.file) {
-      const imageId = await saveImage(req.file);
-      const transferReceipt: ITransferReceipt = await TransferReceipt.findById(
-        req.params.transferReceipt
-      );
-      transferReceipt.image = imageId;
-      await transferReceipt.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
-    }
+    if (!req.file)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "No file was uploaded." });
+    const transferReceipt: ITransferReceipt | null =
+      await TransferReceipt.findById(req.params.transferReceipt);
+    if (!transferReceipt)
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: transferReceiptNotFoundMessage });
+    if (transferReceipt.user.toString() !== req.user._id)
+      return res.status(STATUS_CODES.FORBIDDEN).json({
+        message: "Access denied. The user is not the owner of the receipt.",
+      });
+    if (transferReceipt.hasPaid)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "The transfer receipt is already approved." });
+    const imageId = await saveImage(req.file);
+    const previousImage: mongoose.Types.ObjectId | null | undefined =
+      transferReceipt.image;
+    transferReceipt.image = imageId;
+    await transferReceipt.save();
+    if (previousImage) await Image.findByIdAndDelete(previousImage);
+    return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)
@@ -86,36 +106,73 @@ export async function uploadFileTransferReceipt(
   }
 }
 
+// The transfer a member owes, as computed from the event's purchase receipts,
+// or undefined if they don't have to transfer anything.
+async function expectedTransferOf(
+  eventId: string,
+  userId: string
+): Promise<ITransferInfo | undefined> {
+  const event: IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null =
+    await Event.findById(eventId).populate({
+      path: "purchaseReceipts",
+      populate: [
+        { path: "shoppingDesignee", model: "User" },
+        { path: "participants", model: "User" },
+      ],
+    });
+  if (!event) return undefined;
+  const transferInfo: ITransferInfo[] = calculateTransfersInfo(
+    assignEventValues(event.purchaseReceipts)
+  );
+  return transferInfo.find(
+    (t) => t.receiver !== null && t.userId.equals(userId)
+  );
+}
+
 export async function createTransferReceipt(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    const hasUploadedValue: IHasUploadedInfo = await hasUploaded(
-      req.body.user,
-      req.params.event
-    );
+    const userId: string = req.user._id;
     const event: IEvent = await Event.findById(req.params.event);
     if (event.state !== "readyforpayment")
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: cannotCreateTransferReceiptMessage,
       });
+    const expectedTransfer: ITransferInfo | undefined =
+      await expectedTransferOf(req.params.event, userId);
+    if (!expectedTransfer)
+      return res.status(STATUS_CODES.BAD_REQUEST).json({
+        message: "The user has no transfer to make in this event.",
+      });
+    const hasUploadedValue: IHasUploadedInfo = await hasUploaded(
+      userId,
+      req.params.event
+    );
     if (hasUploadedValue.hasUploaded) {
       const oldTransferReceipt: ITransferReceipt | null =
         await TransferReceipt.findByIdAndRemove(
           hasUploadedValue.transferReceipt
         );
-      const index: number = event.transferReceipts.indexOf(
-        oldTransferReceipt._id
+      if (oldTransferReceipt?.image)
+        await Image.findByIdAndDelete(oldTransferReceipt.image);
+      event.transferReceipts = event.transferReceipts.filter(
+        (id) => !id.equals(hasUploadedValue.transferReceipt)
       );
-      event.transferReceipts.splice(index, 1);
       await event.save();
     }
-    let transferReceipt = new TransferReceipt(req.body);
+    // Who pays, how much and to whom come from the server; the body only
+    // describes the payment.
+    let transferReceipt = new TransferReceipt({
+      description: req.body.description,
+      paymentMethod: req.body.paymentMethod,
+      user: new mongoose.Types.ObjectId(userId),
+      amount: expectedTransfer.amount,
+      receiver: expectedTransfer.receiver.receiverId,
+    });
     transferReceipt.event = new mongoose.Types.ObjectId(req.params.event);
-    let date = new Date();
-    date.setHours(date.getHours() - 3);
-    transferReceipt.datetime = date;
+    transferReceipt.datetime = nowArgentina();
     transferReceipt = await transferReceipt.save();
     event.transferReceipts.push(transferReceipt._id);
     await event.save();
@@ -132,6 +189,21 @@ export async function approvePaymentWithoutReceipt(
   res: Response
 ): Promise<Response> {
   try {
+    if (!isValidId(req.params.user))
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "Invalid ObjectID" });
+    const eventToApprove: IEvent | null = await Event.findById(
+      req.params.event
+    );
+    if (
+      !eventToApprove?.members.some((member) =>
+        member.equals(req.params.user)
+      )
+    )
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "The user is not a member of the event." });
     const hasUploadedValue = await hasUploaded(
       req.params.user,
       req.params.event
@@ -142,9 +214,7 @@ export async function approvePaymentWithoutReceipt(
         .json({ message: "The user has uploaded a transfer receipt" });
     }
     let transferReceipt: ITransferReceipt = new TransferReceipt();
-    const date: Date = new Date();
-    date.setHours(date.getHours() - 3);
-    transferReceipt.datetime = date;
+    transferReceipt.datetime = nowArgentina();
     transferReceipt.amount = 0;
     transferReceipt.receiver = req.body.receiver ? new mongoose.Types.ObjectId(req.body.receiver) : null;
     transferReceipt.event = new mongoose.Types.ObjectId(req.params.event);
@@ -202,7 +272,7 @@ export async function deleteTransferReceipt(
 ): Promise<Response> {
   try {
     const transferReceipt: ITransferReceipt | null =
-      await TransferReceipt.findByIdAndDelete(req.params.id);
+      await TransferReceipt.findById(req.params.id);
     if (!transferReceipt)
       return res.status(STATUS_CODES.NOT_FOUND).json({
         message: transferReceiptNotFoundMessage,
@@ -213,8 +283,12 @@ export async function deleteTransferReceipt(
       return res.status(STATUS_CODES.BAD_REQUEST).json({
         message: cannotCreateTransferReceiptMessage,
       });
-    const index: number = event.transferReceipts.indexOf(transferReceipt._id);
-    event.transferReceipts.splice(index, 1);
+    await TransferReceipt.findByIdAndDelete(transferReceipt._id);
+    if (transferReceipt.image)
+      await Image.findByIdAndDelete(transferReceipt.image);
+    event.transferReceipts = event.transferReceipts.filter(
+      (id) => !id.equals(transferReceipt._id)
+    );
     await event.save();
     return res.status(STATUS_CODES.OK).json(transferReceipt);
   } catch (error) {
@@ -248,11 +322,11 @@ export async function isFinished(eventId: string): Promise<boolean> {
     (t) => t.receiver !== null
   );
 
-  const approvedTransfers: ITransferReceipt[] = event.transferReceipts.filter(
-    (r) => r.hasPaid === true
+  return expectedTransfers.every((transfer) =>
+    event.transferReceipts.some(
+      (r) => r.hasPaid === true && r.user.equals(transfer.userId)
+    )
   );
-
-  return expectedTransfers.length === approvedTransfers.length;
 }
 
 export async function membersWhoHaveUploaded(

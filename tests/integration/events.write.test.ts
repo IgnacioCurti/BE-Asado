@@ -23,11 +23,12 @@ import {
   findReminders,
   newId,
   remindersByType,
+  updateEvent,
   UserFixture,
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 
-// Los cálculos de recordatorios usan hora local; los tests corren con TZ=UTC (vitest.config.ts).
+// Fechas: hora de Argentina guardada como UTC (ver README, "Date convention"); los tests corren con TZ=UTC.
 
 function eventBody(organizer: UserFixture, overrides: Record<string, unknown> = {}) {
   return {
@@ -141,23 +142,51 @@ describe("POST /api/events/createEvent", () => {
     }
   );
 
-  it("[comportamiento actual] estado inválido -> 500", async () => {
+  it("ignora los campos que administra el backend (state, comprobantes, ratings, opciones)", async () => {
     const organizer = await createUser();
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { state: "abierto" }));
-    expect(res.status).toBe(500);
+      .send(
+        eventBody(organizer, {
+          state: "finished",
+          purchaseReceipts: [newId()],
+          transferReceipts: [newId()],
+          ratings: [newId()],
+          options: [newId()],
+        })
+      );
+    expect(res.status).toBe(201);
+    const saved = await findEvent(res.body._id);
+    expect(saved).toMatchObject({
+      state: "available",
+      purchaseReceipts: [],
+      transferReceipts: [],
+      ratings: [],
+      options: [],
+    });
   });
 
   describe("recordatorios", () => {
     it("crea un recordatorio eventStart 30 minutos antes del evento", async () => {
       const organizer = await createUser();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
       const reminders = await findReminders(res.body._id);
       expect(reminders).toEqual([
         expect.objectContaining({ type: "eventStart", datetime: "2030-01-10T20:30:00.000Z", event: res.body._id }),
       ]);
+    });
+
+    it("un evento público crea además un recordatorio newEvent con fecha = ahora - 3 horas", async () => {
+      const organizer = await createUser();
+      const before = Date.now();
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const after = Date.now();
+      const newEvent = (await remindersByType(res.body._id)).newEvent;
+      expect(newEvent).toHaveLength(1);
+      const datetime = new Date(newEvent![0].datetime).getTime();
+      expect(datetime).toBeGreaterThanOrEqual(before - 3 * 60 * 60 * 1000 - 1000);
+      expect(datetime).toBeLessThanOrEqual(after - 3 * 60 * 60 * 1000 + 1000);
     });
 
     it("con penalización crea además penalizationStart (20:00 del día anterior) y penalizationOneWeek (+7 días)", async () => {
@@ -182,24 +211,33 @@ describe("POST /api/events/createEvent", () => {
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
         .send(eventBody(organizer, { penalization: 100 }));
-      expect(Object.keys(await remindersByType(a.body._id))).toEqual(["eventStart"]);
-      expect(Object.keys(await remindersByType(b.body._id))).toEqual(["eventStart"]);
+      expect(Object.keys(await remindersByType(a.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
+      expect(Object.keys(await remindersByType(b.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
     });
   });
 
   describe("notificación de nuevo evento", () => {
+    it("crear el evento no manda mails: los manda el siguiente reminderCheck", async () => {
+      const organizer = await createUser();
+      await createUser({ notifications: { newEvent: true } as any });
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      expect(res.status).toBe(201);
+      expect(sentEmails).toHaveLength(0);
+    });
+
     it("un evento público notifica por mail a los usuarios con notifications.newEvent", async () => {
       const organizer = await createUser();
       const wantsIt = await createUser({ name: "Quiere", notifications: { newEvent: true } as any });
-      const alt = await createUser({ name: "Alt", alternativeEmail: "alt@gmail.com", notifications: { newEvent: true } as any });
+      const other = await createUser({ name: "Otro", notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: false } as any });
 
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
         { email: wantsIt.email, name: "Quiere" },
-        { email: "alt@gmail.com", name: "Alt" },
+        { email: other.email, name: "Otro" },
       ]);
       for (const mail of sentEmails) {
         expect(mail.payload.subject).toBe("FoodSpot | Nuevo evento");
@@ -211,20 +249,35 @@ describe("POST /api/events/createEvent", () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
       await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
+      await api().get("/api/cron/reminderCheck").expect(200);
       expect(sentEmails).toHaveLength(0);
     });
 
-    it("si el envío de mails falla, el evento se crea igual (201) y se dejan de notificar los siguientes", async () => {
+    it("si el evento pasa a privado o se cancela antes del cron, no notifica", async () => {
+      const organizer = await createUser();
+      await createUser({ notifications: { newEvent: true } as any });
+      const a = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const b = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await updateEvent(a.body._id, { isPrivate: true });
+      await updateEvent(b.body._id, { state: "cancelled" });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
+    });
+
+    it("si el envío de mails falla, se intenta notificar a todos y el recordatorio se consume", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: true } as any });
       setBrevoResponseStatus(500);
 
       const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
-      expect(sentEmails).toHaveLength(1);
-      expect(await findReminders(res.body._id)).toHaveLength(1);
+      expect(sentEmails).toHaveLength(2);
+      expect(Object.keys(await remindersByType(res.body._id))).toEqual(["eventStart"]);
     });
   });
 
@@ -356,6 +409,36 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "The event is full." });
+  });
+
+  it("dos altas simultáneas con un solo lugar libre: entra una y la otra recibe 400", async () => {
+    const organizer = await createUser();
+    const a = await createUser();
+    const b = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id], memberLimit: 2 });
+
+    const results = await Promise.all([
+      api().put(`/api/events/subscribeToAnEvent/${a._id}/${event._id}`).set(auth(a.token)),
+      api().put(`/api/events/subscribeToAnEvent/${b._id}/${event._id}`).set(auth(b.token)),
+    ]);
+
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    expect((await findEvent(event._id))!.members).toHaveLength(2);
+  });
+
+  it("el mismo usuario dos veces en simultáneo queda una sola vez", async () => {
+    const organizer = await createUser();
+    const me = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id] });
+    const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
+
+    await Promise.all([
+      api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token)),
+      api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token)),
+    ]);
+
+    expect((await findEvent(event._id))!.members).toEqual([organizer._id, me._id]);
+    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([organizer._id, me._id]);
   });
 
   it("'lleno' se evalúa antes que el estado", async () => {
@@ -596,6 +679,23 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(await findEvent(event._id)).toMatchObject({ title: "Asado editado", state: "closed" });
   });
 
+  it("el estado se guarda en minúsculas y el evento sigue operativo", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
+    const res = await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ state: "Closed" }));
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe("closed");
+
+    const receipt = await api()
+      .post(`/api/purchaseReceipts/createPurchaseReceipt/${event._id}`)
+      .set(auth(organizer.token))
+      .send({ description: "carne", amount: 100 });
+    expect(receipt.status).toBe(201);
+  });
+
   it("un shoppingDesignee (no organizador) también puede editar", async () => {
     const organizer = await createUser();
     const designee = await createUser();
@@ -635,7 +735,7 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(res.body.penalizationStartDate).toBeNull();
   });
 
-  it.each(["closed", "readyforpayment", "finished", "cancelled"])(
+  it.each(["closed", "cancelled"])(
     "pasar a %s sin compradores asignados -> 400 y no guarda cambios",
     async (state) => {
       const organizer = await createUser();
@@ -647,11 +747,92 @@ describe("PUT /api/events/editEvent/:id", () => {
     }
   );
 
-  it("[comportamiento actual] estado inválido -> 500", async () => {
+  it("estado inválido -> 400", async () => {
     const organizer = await createUser();
     const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
     const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "x" }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: 'Cannot change the event state from "available" to "x".' });
+  });
+
+  describe("transiciones de estado", () => {
+    async function eventIn(state: string, opts: { purchaseReceipt?: boolean } = {}) {
+      const organizer = await createUser();
+      const event = await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id], state });
+      if (opts.purchaseReceipt) {
+        await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
+      }
+      return { organizer, event };
+    }
+
+    it.each([
+      ["available", "closed"],
+      ["available", "cancelled"],
+      ["closed", "available"],
+      ["closed", "cancelled"],
+      ["readyforpayment", "closed"],
+      ["closed", "closed"],
+      ["finished", "finished"],
+    ])("%s -> %s está permitido", async (from, to) => {
+      const { organizer, event } = await eventIn(from);
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: to }));
+      expect(res.status).toBe(200);
+      expect((await findEvent(event._id))!.state).toBe(to);
+    });
+
+    it("closed -> readyforpayment está permitido si hay comprobantes de compra", async () => {
+      const { organizer, event } = await eventIn("closed", { purchaseReceipt: true });
+      const res = await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ state: "readyforpayment" }));
+      expect(res.status).toBe(200);
+    });
+
+    it.each([
+      ["available", "readyforpayment"],
+      ["available", "finished"],
+      ["closed", "finished"],
+      ["readyforpayment", "available"],
+      ["readyforpayment", "cancelled"],
+      ["readyforpayment", "finished"],
+      ["cancelled", "available"],
+      ["cancelled", "closed"],
+      ["finished", "available"],
+      ["finished", "readyforpayment"],
+    ])("%s -> %s -> 400 y no guarda cambios", async (from, to) => {
+      const { organizer, event } = await eventIn(from, { purchaseReceipt: true });
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: to }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ message: `Cannot change the event state from "${from}" to "${to}".` });
+      expect(await findEvent(event._id)).toMatchObject({ state: from, title: event.title });
+    });
+
+    it("closed -> readyforpayment sin comprobantes de compra -> 400", async () => {
+      const { organizer, event } = await eventIn("closed");
+      const res = await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ state: "readyforpayment" }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ message: "The event needs at least one purchase receipt to be ready for payment." });
+    });
+
+    it("readyforpayment -> closed con transferencias aprobadas -> 400", async () => {
+      const { organizer, event } = await eventIn("readyforpayment", { purchaseReceipt: true });
+      await createTransferReceipt({ event: event._id, user: organizer._id, amount: 10, hasPaid: true });
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "closed" }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        message: "The event can't go back to closed because some payments were already approved.",
+      });
+    });
+
+    it("el estado del body no distingue mayúsculas", async () => {
+      const { organizer, event } = await eventIn("available");
+      const res = await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(editBody({ state: "CLOSED" }));
+      expect(res.status).toBe(200);
+    });
   });
 
   it("[comportamiento actual] campos obligatorios ausentes -> 500", async () => {
@@ -682,6 +863,24 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(byType.penalizationOneWeek?.map((r) => r.datetime)).toEqual(["2030-02-16T20:00:00.000Z"]);
   });
 
+  it("el recordatorio de penalización es a las 20:00 (convención) sin importar la zona horaria del servidor", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "Asia/Tokyo";
+      await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ penalization: 10, penalizationStartDate: "2030-04-01T00:00:00.000Z" }))
+        .expect(200);
+    } finally {
+      process.env.TZ = original;
+    }
+    const byType = await remindersByType(event._id);
+    expect(byType.penalizationStart?.map((r) => r.datetime)).toEqual(["2030-03-31T20:00:00.000Z"]);
+  });
+
   it("crea los recordatorios de penalización si se agrega una penalización", async () => {
     const organizer = await createUser();
     const event = await createEvent({ organizer: organizer._id });
@@ -694,6 +893,69 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(byType.eventStart).toHaveLength(1);
     expect(byType.penalizationStart?.map((r) => r.datetime)).toEqual(["2030-03-31T20:00:00.000Z"]);
     expect(byType.penalizationOneWeek?.map((r) => r.datetime)).toEqual(["2030-04-07T20:00:00.000Z"]);
+  });
+
+  it("editar un evento que ya pasó no vuelve a crear los recordatorios ya enviados", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({
+      organizer: organizer._id,
+      shoppingDesignee: [organizer._id],
+      datetime: new Date("2020-01-10T21:00:00.000Z"),
+      penalization: 10,
+      penalizationStartDate: new Date("2020-01-15T00:00:00.000Z"),
+    });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(
+        editBody({
+          datetime: "2020-01-10T21:00:00.000Z",
+          state: "closed",
+          penalization: 10,
+          penalizationStartDate: "2020-01-15T00:00:00.000Z",
+        })
+      )
+      .expect(200);
+    expect(await findReminders(event._id)).toEqual([]);
+  });
+
+  it("reprogramar a futuro un evento cuyo recordatorio ya se envió lo vuelve a crear", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id, datetime: new Date("2020-01-10T21:00:00.000Z") });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ datetime: "2030-03-01T22:00:00.000Z" }))
+      .expect(200);
+    const byType = await remindersByType(event._id);
+    expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2030-03-01T21:30:00.000Z"]);
+  });
+
+  it("un recordatorio pendiente se actualiza aunque la nueva fecha ya haya pasado", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    await createReminder({ event: event._id, type: "eventStart", datetime: new Date("2030-01-10T20:30:00.000Z") });
+    await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ datetime: "2020-01-10T21:00:00.000Z" }))
+      .expect(200);
+    const byType = await remindersByType(event._id);
+    expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2020-01-10T20:30:00.000Z"]);
+  });
+
+  it("cancelar el evento borra todos sus recordatorios", async () => {
+    const organizer = await createUser();
+    const created = await api()
+      .post("/api/events/createEvent")
+      .set(auth(organizer.token))
+      .send(eventBody(organizer, { isShoppingDesignee: true, penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+    await api()
+      .put(`/api/events/editEvent/${created.body._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ state: "cancelled", penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }))
+      .expect(200);
+    expect(await findReminders(created.body._id)).toEqual([]);
   });
 
   it("[comportamiento actual] quitar la penalización NO borra sus recordatorios", async () => {
@@ -709,6 +971,7 @@ describe("PUT /api/events/editEvent/:id", () => {
       .expect(200);
     expect(Object.keys(await remindersByType(created.body._id)).sort()).toEqual([
       "eventStart",
+      "newEvent",
       "penalizationOneWeek",
       "penalizationStart",
     ]);

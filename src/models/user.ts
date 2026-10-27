@@ -14,29 +14,9 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
     required: true,
     unique: true,
     validate: {
+      // One "@", a non-empty local part and a dotted domain, without spaces.
       validator: function (v: string): boolean {
-        if (!v) return false;
-        if (v == "davidmartingallegos@gmail.com") return true;
-        let username: string, domain: string, rest: string[];
-        [username, domain, ...rest] = v.split("@");
-        if (rest.length) return false;
-        if (domain !== "endava.com") return false;
-        return true;
-      },
-      message: (props) => `${props.value} is not a valid endava email.`,
-    },
-  },
-
-  alternativeEmail: {
-    type: String,
-    default: null,
-    validate: {
-      validator: function (v: string | null): boolean {
-        if (v == null) return true;
-        let username: string, domain: string, rest: string[];
-        [username, domain, ...rest] = v.split("@");
-        if (rest.length) return false;
-        return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v ?? "");
       },
       message: (props) => `${props.value} is not a valid email.`,
     },
@@ -45,6 +25,10 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
   password: { type: String, required: true },
 
   verificationCode: { type: String, default: null },
+
+  verificationCodeExpiresAt: { type: Date, default: null },
+
+  verificationAttempts: { type: Number, default: 0 },
 
   cbu: { type: String, default: null },
 

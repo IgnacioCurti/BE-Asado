@@ -8,11 +8,12 @@ const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
 
   description: { type: String, required: true },
 
-  memberLimit: { type: Number, required: true },
+  memberLimit: { type: Number, required: true, min: 1 },
 
   state: {
     type: String,
     required: true,
+    lowercase: true,
     default: "available",
     validate: {
       validator: function (v: string): boolean {
@@ -77,7 +78,7 @@ const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
 
   isPrivate: { type: Boolean, default: false },
 
-  penalization: { type: Number, default: null },
+  penalization: { type: Number, default: null, min: 0 },
 
   penalizationStartDate: { type: Date },
 });

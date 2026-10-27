@@ -42,6 +42,8 @@ describe("Ciclo de vida completo de un evento", () => {
       })
       .expect(201);
     const eventId: string = created.body._id;
+    expect(sentEmails).toHaveLength(0);
+    await api().get("/api/cron/reminderCheck").expect(200);
     expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual(["beto@endava.com"]);
 
     // 3. Beto y Caro se suman; el evento queda lleno
@@ -52,8 +54,9 @@ describe("Ciclo de vida completo de un evento", () => {
     expect(full.body).toEqual({ message: "The event is full." });
 
     // 4. Votación de menú
-    const vacio = await api().post(`/api/options/createOption/${eventId}`).set(auth(ana.token)).send({ title: "Vacío", participants: [ana.id] }).expect(201);
-    await api().put(`/api/options/editOption/${vacio.body._id}`).set(auth(beto.token)).send({ participants: [ana.id, beto.id] }).expect(200);
+    const vacio = await api().post(`/api/options/createOption/${eventId}`).set(auth(ana.token)).send({ title: "Vacío" }).expect(201);
+    await api().put(`/api/options/vote/${vacio.body._id}`).set(auth(ana.token)).expect(200);
+    await api().put(`/api/options/vote/${vacio.body._id}`).set(auth(beto.token)).expect(200);
     const pending = await api().get(`/api/options/getMembersWhoHaventVoted/${eventId}`).set(auth(ana.token)).expect(200);
     expect(pending.body.membersWhoHaventVoted.map((m: any) => m._id)).toEqual([caro.id]);
 

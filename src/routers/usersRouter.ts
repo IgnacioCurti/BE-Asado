@@ -21,9 +21,9 @@ usersRouter.get("/getUsers", auth, getUsers);
 
 usersRouter.get("/getUserById/:id", auth, getUserById);
 
-usersRouter.get("/isDebtor/:id", auth, isDebtor);
+usersRouter.get("/isDebtor/:id", [auth, sameUser], isDebtor);
 
-usersRouter.get("/hasPendingTransfers/:id", auth, hasPendingTransfers);
+usersRouter.get("/hasPendingTransfers/:id", [auth, sameUser], hasPendingTransfers);
 
 usersRouter.post("/register", register);
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import bcrypt from "bcrypt";
 import { api } from "../helpers/api.js";
 import { createUser, findUser } from "../helpers/fixtures.js";
+import { User } from "../../src/models/user.js";
+import mongoose from "mongoose";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 
 function codeFromLastEmail(): string {
@@ -31,18 +33,16 @@ describe("POST /api/password/forgot", () => {
     expect(await bcrypt.compare(code, stored!.verificationCode!)).toBe(true);
   });
 
-  it("si el usuario tiene email alternativo, el mail se manda ahí", async () => {
-    const user = await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().post("/api/password/forgot").send({ email: user.email });
-    expect(res.body).toEqual({ message: "Mail sent succesfully to ana@gmail.com." });
-    expect(sentEmails[0].payload.to[0].email).toBe("ana@gmail.com");
-  });
+  it("un alternativeEmail heredado en la base no se usa: ni para buscar ni para mandar", async () => {
+    const user = await createUser();
+    await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(user._id) }, { $set: { alternativeEmail: "ana@gmail.com" } });
 
-  it("también encuentra al usuario por su email alternativo", async () => {
-    await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().post("/api/password/forgot").send({ email: "ANA@gmail.com" });
-    expect(res.status).toBe(200);
-    expect(sentEmails[0].payload.to[0].email).toBe("ana@gmail.com");
+    const byAlternative = await api().post("/api/password/forgot").send({ email: "ana@gmail.com" });
+    expect(byAlternative.status).toBe(404);
+
+    const res = await api().post("/api/password/forgot").send({ email: user.email });
+    expect(res.body).toEqual({ message: `Mail sent succesfully to ${user.email}.` });
+    expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([user.email]);
   });
 
   it("el email no distingue mayúsculas", async () => {
@@ -50,6 +50,18 @@ describe("POST /api/password/forgot", () => {
     const res = await api().post("/api/password/forgot").send({ email: "ANA@ENDAVA.COM" });
     expect(res.status).toBe(200);
     expect(sentEmails[0].payload.to[0].email).toBe(user.email);
+  });
+
+  it("el código vence a los 15 minutos y el pedido reinicia los intentos", async () => {
+    const user = await createUser({ verificationCodePlain: "111111" });
+    await User.updateOne({ _id: user._id }, { verificationAttempts: 3 });
+    const before = Date.now();
+    await api().post("/api/password/forgot").send({ email: user.email }).expect(200);
+    const stored = await findUser(user._id);
+    const expiresAt = new Date(stored!.verificationCodeExpiresAt!).getTime();
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
+    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 15 * 60 * 1000);
+    expect(stored!.verificationAttempts).toBe(0);
   });
 
   it("cada pedido genera un código nuevo que invalida el anterior", async () => {
@@ -115,16 +127,34 @@ describe("PUT /api/password/verifyCode", () => {
     expect(res.body).toEqual({ message: "User does not exist." });
   });
 
-  it("solo busca por email principal (no por el alternativo)", async () => {
-    await createUser({ alternativeEmail: "ana@gmail.com", verificationCodePlain: "123456" });
-    const res = await api().put("/api/password/verifyCode").send({ email: "ana@gmail.com", verificationCode: "123456" });
-    expect(res.status).toBe(404);
-  });
-
-  it("[comportamiento actual] si el usuario nunca pidió un código responde 500", async () => {
+  it("si el usuario nunca pidió un código -> 400", async () => {
     const user = await createUser();
     const res = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "123456" });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "User never requested a password change." });
+  });
+
+  it("código vencido -> 400 y se descarta", async () => {
+    const user = await createUser({ verificationCodePlain: "123456", verificationCodeExpiresAt: new Date(Date.now() - 1000) });
+    const res = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "123456" });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "Verification code expired. Request a new one." });
+    expect((await findUser(user._id))?.verificationCode).toBeNull();
+  });
+
+  it("al 5º intento fallido descarta el código, aunque después llegue el correcto", async () => {
+    const user = await createUser({ verificationCodePlain: "123456" });
+    for (let i = 0; i < 4; i++) {
+      const res = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "000000" });
+      expect(res.body).toBe("Invalid verification code.");
+    }
+    const fifth = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "000000" });
+    expect(fifth.status).toBe(400);
+    expect(fifth.body).toEqual({ message: "Too many failed attempts. Request a new code." });
+
+    const correct = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "123456" });
+    expect(correct.status).toBe(400);
+    expect(correct.body).toEqual({ message: "User never requested a password change." });
   });
 });
 
@@ -173,6 +203,26 @@ describe("PUT /api/password/recover", () => {
       .send({ email: user.email, verificationCode: "000000", password: "NuevaClave1!" });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "Invalid verification code." });
+    expect((await findUser(user._id))?.password).toBe(user.password);
+  });
+
+  it("los intentos fallidos de verifyCode y recover se suman", async () => {
+    const user = await createUser({ verificationCodePlain: "123456" });
+    const wrong = { email: user.email, verificationCode: "000000", password: "NuevaClave1!" };
+    for (let i = 0; i < 2; i++) await api().put("/api/password/verifyCode").send(wrong);
+    for (let i = 0; i < 2; i++) await api().put("/api/password/recover").send(wrong);
+    const fifth = await api().put("/api/password/recover").send(wrong);
+    expect(fifth.body).toEqual({ message: "Too many failed attempts. Request a new code." });
+    expect((await findUser(user._id))?.password).toBe(user.password);
+  });
+
+  it("código vencido -> 400 y la contraseña no cambia", async () => {
+    const user = await createUser({ verificationCodePlain: "123456", verificationCodeExpiresAt: new Date(Date.now() - 1000) });
+    const res = await api()
+      .put("/api/password/recover")
+      .send({ email: user.email, verificationCode: "123456", password: "NuevaClave1!" });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "Verification code expired. Request a new one." });
     expect((await findUser(user._id))?.password).toBe(user.password);
   });
 

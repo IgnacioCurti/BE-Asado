@@ -20,10 +20,23 @@ import mongoose from "mongoose";
 
 const userNotFoundMessage = "The user with the given ID was not found.";
 
+// Fields a client may set when registering. verificationCode and
+// profilePicture are only set by their own flows.
+const REGISTER_FIELDS: string[] = [
+  "name",
+  "lastName",
+  "email",
+  "password",
+  "cbu",
+  "alias",
+  "specialDiet",
+  "notifications",
+];
+
 export async function getUsers(req: Request, res: Response): Promise<Response> {
   try {
     const users: ISafeUser[] = await User.find().select(
-      "-password -verificationCode"
+      "-password -verificationCode -verificationCodeExpiresAt -verificationAttempts"
     );
     return res.status(STATUS_CODES.OK).json(users);
   } catch (error) {
@@ -39,7 +52,7 @@ export async function getUserById(
 ): Promise<Response> {
   try {
     const user: ISafeUser | null = await User.findById(req.params.id).select(
-      "-password -verificationCode"
+      "-password -verificationCode -verificationCodeExpiresAt -verificationAttempts"
     );
     if (!user) {
       return res
@@ -165,7 +178,13 @@ export async function register(req: Request, res: Response): Promise<Response> {
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "Password doesn't match the requirements." });
     }
-    let user: IUser = new User(req.body);
+    const fields: Record<string, unknown> = Object.fromEntries(
+      REGISTER_FIELDS.filter((field) => field in req.body).map((field) => [
+        field,
+        req.body[field],
+      ])
+    );
+    let user: IUser = new User(fields);
     const salt: string = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(user.password, salt);
     user = await user.save();
@@ -186,10 +205,7 @@ export async function editUser(req: Request, res: Response): Promise<Response> {
         .json({ message: userNotFoundMessage });
     user.name = req.body.name ? req.body.name : user.name;
     user.lastName = req.body.lastName ? req.body.lastName : user.lastName;
-    user.alternativeEmail = req.body.alternativeEmail
-      ? req.body.alternativeEmail.toLowerCase()
-      : null;
-    user.specialDiet = req.body.specialDiet;
+    user.specialDiet = req.body.specialDiet ?? user.specialDiet;
     user.alias = req.body.alias;
     user.cbu = req.body.cbu;
     user.notifications = {
@@ -217,22 +233,24 @@ export async function editProfilePicture(
   res: Response
 ): Promise<Response> {
   try {
-    if (req.file) {
-      let user: IUser | null = await User.findById(req.params.id);
-      if (!user)
-        return res
-          .status(STATUS_CODES.NOT_FOUND)
-          .json({ message: userNotFoundMessage });
-      if (user.profilePicture) {
-        const deletedImage: IImage | null = await Image.findOneAndDelete(
-          user.profilePicture
-        );
-      }
-      const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
-      user.profilePicture = imageId;
-      user = await user.save();
-      return res.status(STATUS_CODES.OK).json({ imageId: imageId });
+    if (!req.file)
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "No file was uploaded." });
+    let user: IUser | null = await User.findById(req.params.id);
+    if (!user)
+      return res
+        .status(STATUS_CODES.NOT_FOUND)
+        .json({ message: userNotFoundMessage });
+    if (user.profilePicture) {
+      const deletedImage: IImage | null = await Image.findOneAndDelete(
+        user.profilePicture
+      );
     }
+    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+    user.profilePicture = imageId;
+    user = await user.save();
+    return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
       .status(STATUS_CODES.INTERNAL_SERVER_ERROR)

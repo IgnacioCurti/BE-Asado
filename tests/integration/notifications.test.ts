@@ -9,9 +9,12 @@ import {
   createUser,
   findReminders,
   newId,
+  updateEvent,
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 import { getEventsDebtors } from "../../src/utils/utils.js";
+import { User } from "../../src/models/user.js";
+import mongoose from "mongoose";
 
 const HOUR: number = 60 * 60 * 1000;
 const hoursAgo = (h: number) => new Date(Date.now() - h * HOUR);
@@ -55,10 +58,12 @@ describe("GET /api/cron/reminderCheck", () => {
   });
 
   describe("eventStart", () => {
-    it("notifica a los miembros con notifications.eventStart (al email alternativo si tienen)", async () => {
+    it("notifica a los miembros con notifications.eventStart (siempre al email principal)", async () => {
       const a = await createUser({ name: "A", notifications: ALL_ON });
       const b = await createUser({ name: "B", notifications: ALL_OFF });
-      const c = await createUser({ name: "C", alternativeEmail: "c@gmail.com", notifications: ALL_ON });
+      const c = await createUser({ name: "C", notifications: ALL_ON });
+      // un alternativeEmail que haya quedado en la base de antes ya no se usa
+      await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(c._id) }, { $set: { alternativeEmail: "c@gmail.com" } });
       const notMember = await createUser({ notifications: ALL_ON });
       const event = await createEvent({ organizer: a._id, members: [a._id, b._id, c._id] });
       await createReminder({ event: event._id, type: "eventStart", datetime: hoursAgo(4) });
@@ -67,7 +72,7 @@ describe("GET /api/cron/reminderCheck", () => {
 
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
         { email: a.email, name: "A" },
-        { email: "c@gmail.com", name: "C" },
+        { email: c.email, name: "C" },
       ]);
       expect(sentEmails.map((m) => m.payload.to[0].email)).not.toContain(notMember.email);
       for (const mail of sentEmails) {
@@ -76,7 +81,7 @@ describe("GET /api/cron/reminderCheck", () => {
       }
     });
 
-    it("si Brevo falla, el recordatorio se borra igual y deja de notificar al resto", async () => {
+    it("si Brevo falla con un destinatario, igual intenta con el resto y borra el recordatorio", async () => {
       const a = await createUser({ notifications: ALL_ON });
       const b = await createUser({ notifications: ALL_ON });
       const event = await createEvent({ organizer: a._id, members: [a._id, b._id] });
@@ -86,7 +91,18 @@ describe("GET /api/cron/reminderCheck", () => {
       const res = await api().get("/api/cron/reminderCheck");
 
       expect(res.status).toBe(200);
-      expect(sentEmails).toHaveLength(1);
+      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([a.email, b.email]);
+      expect(await countReminders()).toBe(0);
+    });
+
+    it("no notifica si el evento está cancelado, y borra el recordatorio", async () => {
+      const a = await createUser({ notifications: ALL_ON });
+      const event = await createEvent({ organizer: a._id, members: [a._id], state: "cancelled" });
+      await createReminder({ event: event._id, type: "eventStart", datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
       expect(await countReminders()).toBe(0);
     });
 
@@ -100,10 +116,15 @@ describe("GET /api/cron/reminderCheck", () => {
     });
   });
 
+  const PENALIZATION_SUBJECTS = {
+    penalizationStart: "FoodSpot | La penalización está por empezar",
+    penalizationOneWeek: "FoodSpot | La penalización ha estado en curso durante una semana",
+  };
+
   describe.each(["penalizationStart", "penalizationOneWeek"] as const)("%s", (type) => {
-    async function debtScenario() {
+    async function debtScenario(betoOverrides: Parameters<typeof createUser>[0] = {}) {
       const ana = await createUser({ name: "Ana", notifications: ALL_ON });
-      const beto = await createUser({ name: "Beto", notifications: ALL_ON });
+      const beto = await createUser({ name: "Beto", notifications: ALL_ON, ...betoOverrides });
       const event = await createEvent({
         organizer: ana._id,
         members: [ana._id, beto._id],
@@ -115,25 +136,67 @@ describe("GET /api/cron/reminderCheck", () => {
       return { ana, beto, event };
     }
 
-    it("[BUG - comportamiento actual] un deudor SIN comprobante no recibe el mail (getEventsDebtors lanza TypeError)", async () => {
-      const { event } = await debtScenario();
+    it("un deudor SIN comprobante recibe el mail (y el acreedor no)", async () => {
+      const { beto, event } = await debtScenario();
       await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
 
       const res = await api().get("/api/cron/reminderCheck");
 
       expect(res.status).toBe(200);
-      expect(sentEmails).toHaveLength(0);
+      expect(sentEmails.map((m) => m.payload.to[0])).toEqual([{ email: beto.email, name: "Beto" }]);
+      expect(sentEmails[0].payload.subject).toBe(PENALIZATION_SUBJECTS[type]);
+      expect(sentEmails[0].payload.htmlContent).toContain(`https://food-spot.vercel.app/event/${event._id}`);
       expect(await countReminders()).toBe(0);
     });
 
-    it("[BUG - comportamiento actual] un deudor CON comprobante sin aprobar tampoco recibe el mail", async () => {
+    it("un deudor CON comprobante sin aprobar también recibe el mail", async () => {
       const { ana, beto, event } = await debtScenario();
       await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, receiver: ana._id });
       await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
 
       await api().get("/api/cron/reminderCheck").expect(200);
 
+      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([beto.email]);
+    });
+
+    it("un deudor con el pago aprobado no recibe el mail", async () => {
+      const { ana, beto, event } = await debtScenario();
+      await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, receiver: ana._id, hasPaid: true });
+      await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
       expect(sentEmails).toHaveLength(0);
+    });
+
+    it("ignora un alternativeEmail heredado en la base: manda al email principal", async () => {
+      const { beto, event } = await debtScenario();
+      await User.collection.updateOne({ _id: new mongoose.Types.ObjectId(beto._id) }, { $set: { alternativeEmail: "beto@gmail.com" } });
+      await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails.map((m) => m.payload.to[0])).toEqual([{ email: beto.email, name: "Beto" }]);
+    });
+
+    it("no notifica si el evento está cancelado", async () => {
+      const { event } = await debtScenario();
+      await updateEvent(event._id, { state: "cancelled" });
+      await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
+    });
+
+    it(`respeta notifications.${type} = false`, async () => {
+      const { event } = await debtScenario({ notifications: { ...ALL_ON, [type]: false } });
+      await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
+      expect(await countReminders()).toBe(0);
     });
 
     it("si el evento no existe, borra el recordatorio sin fallar", async () => {
@@ -165,14 +228,25 @@ describe("getEventsDebtors (utils)", () => {
     await expect(getEventsDebtors(event._id)).resolves.toEqual([]);
   });
 
-  it("[BUG - comportamiento actual] lanza TypeError cuando algún deudor no subió comprobante", async () => {
-    const { event } = await debtScenario();
-    await expect(getEventsDebtors(event._id)).rejects.toThrow(TypeError);
+  const ids = (users: { _id: unknown }[]) => users.map((u) => String(u._id)).sort();
+
+  it("devuelve a los deudores que no subieron comprobante", async () => {
+    const { beto, caro, event } = await debtScenario();
+    const debtors = await getEventsDebtors(event._id);
+    expect(ids(debtors)).toEqual(ids([beto, caro]));
   });
 
-  it("[BUG - comportamiento actual] si todos los deudores subieron comprobante devuelve [] (nunca devuelve deudores)", async () => {
+  it("cuenta como deudor a quien tiene el comprobante sin aprobar, no a quien ya fue aprobado", async () => {
     const { ana, beto, caro, event } = await debtScenario();
     await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, receiver: ana._id });
+    await createTransferReceipt({ event: event._id, user: caro._id, amount: 100, receiver: ana._id, hasPaid: true });
+    const debtors = await getEventsDebtors(event._id);
+    expect(ids(debtors)).toEqual(ids([beto]));
+  });
+
+  it("si todos tienen el pago aprobado devuelve []", async () => {
+    const { ana, beto, caro, event } = await debtScenario();
+    await createTransferReceipt({ event: event._id, user: beto._id, amount: 100, receiver: ana._id, hasPaid: true });
     await createTransferReceipt({ event: event._id, user: caro._id, amount: 100, receiver: ana._id, hasPaid: true });
     await expect(getEventsDebtors(event._id)).resolves.toEqual([]);
   });
