@@ -176,13 +176,24 @@ describe("POST /api/transferReceipts/createTransferReceipt/:event", () => {
     expect(await countTransferReceipts()).toBe(0);
   });
 
-  it("[comportamiento actual] evento inexistente -> 500", async () => {
+  it("evento inexistente -> 404", async () => {
     const user = await createUser();
     const res = await api()
       .post(`/api/transferReceipts/createTransferReceipt/${newId()}`)
       .set(auth(user.token))
       .send({ user: user._id, amount: 1 });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
+  });
+
+  it("quien no es miembro del evento -> 403 y no crea nada", async () => {
+    const { ana, event } = await paymentScenario();
+    const outsider = await createUser();
+    const res = await api()
+      .post(`/api/transferReceipts/createTransferReceipt/${event._id}`)
+      .set(auth(outsider.token))
+      .send({ user: outsider._id, amount: 100, receiver: ana._id });
+    expect(res.status).toBe(403);
+    expect(await countTransferReceipts()).toBe(0);
   });
 
   it("[comportamiento actual] sin amount -> 500, pero el comprobante anterior ya fue borrado", async () => {
