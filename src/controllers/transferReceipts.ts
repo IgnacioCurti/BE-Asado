@@ -22,6 +22,7 @@ import {
   IUserBalance,
 } from "../models/interfaces.js";
 import mongoose from "mongoose";
+import { isValidId } from "../utils/utils.js";
 
 const transferReceiptNotFoundMessage: string =
   "The transfer receipt with the given ID was not found.";
@@ -151,6 +152,21 @@ export async function approvePaymentWithoutReceipt(
   res: Response
 ): Promise<Response> {
   try {
+    if (!isValidId(req.params.user))
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "Invalid ObjectID" });
+    const eventToApprove: IEvent | null = await Event.findById(
+      req.params.event
+    );
+    if (
+      !eventToApprove?.members.some((member) =>
+        member.equals(req.params.user)
+      )
+    )
+      return res
+        .status(STATUS_CODES.BAD_REQUEST)
+        .json({ message: "The user is not a member of the event." });
     const hasUploadedValue = await hasUploaded(
       req.params.user,
       req.params.event
