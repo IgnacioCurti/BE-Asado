@@ -11,6 +11,7 @@ import {
 import {
   auth,
   shoppingDesignee,
+  eventParticipant,
   multerUpload,
 } from "../middleware/middleware.js";
 
@@ -36,7 +37,7 @@ transferReceiptRouter.post(
 
 transferReceiptRouter.post(
   "/createTransferReceipt/:event",
-  auth,
+  [auth, eventParticipant],
   createTransferReceipt
 );
 
