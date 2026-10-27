@@ -33,11 +33,16 @@ const eventNotFoundMessage: string =
   "The event with the given ID was not found.";
 
 export async function getEvents(
-  req: Request,
+  req: IRequestWithUser,
   res: Response
 ): Promise<Response> {
   try {
-    const events: IEvent[] = await Event.find().sort({
+    const events: IEvent[] = await Event.find({
+      $or: [
+        { isPrivate: { $ne: true } },
+        { isPrivate: true, members: req.user._id },
+      ],
+    }).sort({
       datetime: -1,
       _id: 1,
     });
