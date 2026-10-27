@@ -387,7 +387,7 @@ describe("DELETE /api/transferReceipts/deleteTransferReceipt/:id", () => {
     expect((await findEvent(event._id))!.transferReceipts).toEqual([keep._id]);
   });
 
-  it("[BUG - comportamiento actual] fuera de readyforpayment responde 400 pero el comprobante YA fue borrado", async () => {
+  it("fuera de readyforpayment responde 400 y no borra el comprobante", async () => {
     const { beto, event } = await paymentScenario("finished");
     const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
 
@@ -395,8 +395,7 @@ describe("DELETE /api/transferReceipts/deleteTransferReceipt/:id", () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "You can only create transfer receipts when the event is ready for payment." });
-    expect(await findTransferReceipt(receipt._id)).toBeNull();
-    // ...y el evento sigue referenciándolo
+    expect(await findTransferReceipt(receipt._id)).not.toBeNull();
     expect((await findEvent(event._id))!.transferReceipts).toEqual([receipt._id]);
   });
 
