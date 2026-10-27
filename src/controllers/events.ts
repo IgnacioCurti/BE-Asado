@@ -9,6 +9,7 @@ import { Rating } from "../models/rating.js";
 import { Reminder } from "../models/reminder.js";
 import { membersWhoHaveUploaded } from "./transferReceipts.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { nowArgentina } from "../utils/dates.js";
 import { notifyNewEvent } from "./notifications.js";
 import {
   IEvent,
@@ -181,9 +182,7 @@ async function upsertReminder(
     await existing.save();
     return;
   }
-  const now: Date = new Date();
-  now.setHours(now.getHours() - 3);
-  if (datetime <= now) return;
+  if (datetime <= nowArgentina()) return;
   await new Reminder({ event: event._id, type, datetime }).save();
 }
 
@@ -200,8 +199,10 @@ async function updateReminders(event: IEvent): Promise<void> {
     const penalizationReminderDate: Date = new Date(
       event.penalizationStartDate
     );
-    penalizationReminderDate.setDate(penalizationReminderDate.getDate() - 1);
-    penalizationReminderDate.setHours(20, 0, 0, 0); // 8 PM the day before penalization starts
+    penalizationReminderDate.setUTCDate(
+      penalizationReminderDate.getUTCDate() - 1
+    );
+    penalizationReminderDate.setUTCHours(20, 0, 0, 0); // 8 PM (Argentina) the day before penalization starts
     await upsertReminder(
       reminders,
       event,

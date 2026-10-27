@@ -27,7 +27,7 @@ import {
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 
-// Los cálculos de recordatorios usan hora local; los tests corren con TZ=UTC (vitest.config.ts).
+// Fechas: hora de Argentina guardada como UTC (ver README, "Date convention"); los tests corren con TZ=UTC.
 
 function eventBody(organizer: UserFixture, overrides: Record<string, unknown> = {}) {
   return {
@@ -824,6 +824,24 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2030-02-01T17:30:00.000Z"]);
     expect(byType.penalizationStart?.map((r) => r.datetime)).toEqual(["2030-02-09T20:00:00.000Z"]);
     expect(byType.penalizationOneWeek?.map((r) => r.datetime)).toEqual(["2030-02-16T20:00:00.000Z"]);
+  });
+
+  it("el recordatorio de penalización es a las 20:00 (convención) sin importar la zona horaria del servidor", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "Asia/Tokyo";
+      await api()
+        .put(`/api/events/editEvent/${event._id}`)
+        .set(auth(organizer.token))
+        .send(editBody({ penalization: 10, penalizationStartDate: "2030-04-01T00:00:00.000Z" }))
+        .expect(200);
+    } finally {
+      process.env.TZ = original;
+    }
+    const byType = await remindersByType(event._id);
+    expect(byType.penalizationStart?.map((r) => r.datetime)).toEqual(["2030-03-31T20:00:00.000Z"]);
   });
 
   it("crea los recordatorios de penalización si se agrega una penalización", async () => {

@@ -3,6 +3,13 @@
 Express.js REST API for Food-Spot
 
 
+## Date convention
+
+All dates are Argentina local time (UTC-3, no DST) stored as if they were UTC: an event at 21:00 in Buenos Aires is saved as `21:00Z`, and clients display the stored value without converting it.
+
+On the backend, compare against "now" with `nowArgentina()` (`src/utils/dates.ts`), and build wall-clock times (for example, the 20:00 penalization reminder) with the UTC setters, so results don't depend on the server's time zone.
+
+
 ## Endpoints documentation
 
 References: 

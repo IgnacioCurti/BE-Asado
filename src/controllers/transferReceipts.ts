@@ -4,6 +4,7 @@ import { Event } from "../models/event.js";
 import { Image } from "../models/image.js";
 import { saveImage } from "./images.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
+import { nowArgentina } from "../utils/dates.js";
 import {
   assignEventValues,
   calculateTransfersInfo,
@@ -171,9 +172,7 @@ export async function createTransferReceipt(
       receiver: expectedTransfer.receiver.receiverId,
     });
     transferReceipt.event = new mongoose.Types.ObjectId(req.params.event);
-    let date = new Date();
-    date.setHours(date.getHours() - 3);
-    transferReceipt.datetime = date;
+    transferReceipt.datetime = nowArgentina();
     transferReceipt = await transferReceipt.save();
     event.transferReceipts.push(transferReceipt._id);
     await event.save();
@@ -215,9 +214,7 @@ export async function approvePaymentWithoutReceipt(
         .json({ message: "The user has uploaded a transfer receipt" });
     }
     let transferReceipt: ITransferReceipt = new TransferReceipt();
-    const date: Date = new Date();
-    date.setHours(date.getHours() - 3);
-    transferReceipt.datetime = date;
+    transferReceipt.datetime = nowArgentina();
     transferReceipt.amount = 0;
     transferReceipt.receiver = req.body.receiver ? new mongoose.Types.ObjectId(req.body.receiver) : null;
     transferReceipt.event = new mongoose.Types.ObjectId(req.params.event);
