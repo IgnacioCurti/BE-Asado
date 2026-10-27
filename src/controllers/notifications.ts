@@ -26,9 +26,7 @@ async function notifyUser(
   message: string,
   context: string
 ): Promise<void> {
-  const email: string = user.alternativeEmail
-    ? user.alternativeEmail
-    : user.email;
+  const email: string = user.email;
   try {
     await sendEmail(email, subject, user.name, message);
     console.log(`Notification sent to ${user.name} (${email}) for ${context}`);

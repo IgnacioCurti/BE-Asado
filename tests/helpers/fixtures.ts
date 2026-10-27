@@ -44,7 +44,6 @@ export interface UserFixture {
   name: string;
   lastName?: string;
   email: string;
-  alternativeEmail: string | null;
   password: string; // hash
   verificationCode: string | null;
   verificationCodeExpiresAt: string | Date | null;

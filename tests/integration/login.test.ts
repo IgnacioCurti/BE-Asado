@@ -54,12 +54,6 @@ describe("POST /api/login", () => {
     expect(res.body).toEqual({ message: "Invalid email or password" });
   });
 
-  it("no permite loguearse con el email alternativo", async () => {
-    const user = await createUser({ alternativeEmail: "ana@gmail.com" });
-    const res = await api().post("/api/login").send({ email: "ana@gmail.com", password: user.plainPassword });
-    expect(res.status).toBe(400);
-  });
-
   it("[comportamiento actual] sin email responde 500 (TypeError en toLowerCase)", async () => {
     const res = await api().post("/api/login").send({ password: "x" });
     expect(res.status).toBe(500);

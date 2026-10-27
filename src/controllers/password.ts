@@ -59,8 +59,7 @@ async function checkVerificationCode(
 export async function forgot(req: Request, res: Response): Promise<Response> {
   try {
     req.body.email = req.body.email.toLowerCase();
-    let user: IUser | null = await User.findOne({ email: req.body.email });
-    if (!user) user = await User.findOne({ alternativeEmail: req.body.email });
+    const user: IUser | null = await User.findOne({ email: req.body.email });
     if (!user)
       return res
         .status(STATUS_CODES.NOT_FOUND)
@@ -73,9 +72,7 @@ export async function forgot(req: Request, res: Response): Promise<Response> {
     );
     user.verificationAttempts = 0;
     await user.save();
-    const email: string = user.alternativeEmail
-      ? user.alternativeEmail
-      : user.email;
+    const email: string = user.email;
     const subject: string = "FoodSpot | Recuperar contraseña";
     const message: string = passwordRecoveryTemplate(code.toString());
 
