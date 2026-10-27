@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import { randomInt } from "crypto";
 import { Request, Response } from "express";
 import { User } from "../models/user.js";
 import { sendEmail } from "../utils/utils.js";
@@ -64,7 +65,7 @@ export async function forgot(req: Request, res: Response): Promise<Response> {
       return res
         .status(STATUS_CODES.NOT_FOUND)
         .json({ message: nonExistentUserMessage });
-    const code: number = Math.floor(Math.random() * 900000) + 100000;
+    const code: number = randomInt(100000, 1000000);
     const salt: string = await bcrypt.genSalt(10);
     user.verificationCode = await bcrypt.hash(code.toString(), salt);
     user.verificationCodeExpiresAt = new Date(
