@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { TransferReceipt } from "../models/transferReceipt.js";
 import { Event } from "../models/event.js";
+import { Image } from "../models/image.js";
 import { saveImage } from "./images.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import {
@@ -78,8 +79,11 @@ export async function uploadFileTransferReceipt(
     const transferReceipt: ITransferReceipt = await TransferReceipt.findById(
       req.params.transferReceipt
     );
+    const previousImage: mongoose.Types.ObjectId | null | undefined =
+      transferReceipt.image;
     transferReceipt.image = imageId;
     await transferReceipt.save();
+    if (previousImage) await Image.findByIdAndDelete(previousImage);
     return res.status(STATUS_CODES.OK).json({ imageId: imageId });
   } catch (error) {
     return res
@@ -103,7 +107,12 @@ export async function createTransferReceipt(
         message: cannotCreateTransferReceiptMessage,
       });
     if (hasUploadedValue.hasUploaded) {
-      await TransferReceipt.findByIdAndRemove(hasUploadedValue.transferReceipt);
+      const oldTransferReceipt: ITransferReceipt | null =
+        await TransferReceipt.findByIdAndRemove(
+          hasUploadedValue.transferReceipt
+        );
+      if (oldTransferReceipt?.image)
+        await Image.findByIdAndDelete(oldTransferReceipt.image);
       event.transferReceipts = event.transferReceipts.filter(
         (id) => !id.equals(hasUploadedValue.transferReceipt)
       );
@@ -212,6 +221,8 @@ export async function deleteTransferReceipt(
         message: cannotCreateTransferReceiptMessage,
       });
     await TransferReceipt.findByIdAndDelete(transferReceipt._id);
+    if (transferReceipt.image)
+      await Image.findByIdAndDelete(transferReceipt.image);
     event.transferReceipts = event.transferReceipts.filter(
       (id) => !id.equals(transferReceipt._id)
     );
