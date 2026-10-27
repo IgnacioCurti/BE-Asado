@@ -14,16 +14,11 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
     required: true,
     unique: true,
     validate: {
+      // One "@", a non-empty local part and a dotted domain, without spaces.
       validator: function (v: string): boolean {
-        if (!v) return false;
-        if (v == "davidmartingallegos@gmail.com") return true;
-        let username: string, domain: string, rest: string[];
-        [username, domain, ...rest] = v.split("@");
-        if (rest.length) return false;
-        if (domain !== "endava.com") return false;
-        return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v ?? "");
       },
-      message: (props) => `${props.value} is not a valid endava email.`,
+      message: (props) => `${props.value} is not a valid email.`,
     },
   },
 
