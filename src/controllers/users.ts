@@ -209,7 +209,7 @@ export async function editUser(req: Request, res: Response): Promise<Response> {
     user.alternativeEmail = req.body.alternativeEmail
       ? req.body.alternativeEmail.toLowerCase()
       : null;
-    user.specialDiet = req.body.specialDiet;
+    user.specialDiet = req.body.specialDiet ?? user.specialDiet;
     user.alias = req.body.alias;
     user.cbu = req.body.cbu;
     user.notifications = {

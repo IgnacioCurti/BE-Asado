@@ -299,6 +299,19 @@ describe("PUT /api/users/editUser/:id", () => {
     });
   });
 
+  it("si specialDiet no viene, conserva el valor actual", async () => {
+    const user = await createUser({ specialDiet: ["celiac"] });
+    const res = await api().put(`/api/users/editUser/${user._id}`).set(auth(user.token)).send({ name: "Otro" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ name: "Otro", specialDiet: ["celiac"] });
+  });
+
+  it("specialDiet: [] explícito la vacía", async () => {
+    const user = await createUser({ specialDiet: ["celiac"] });
+    const res = await api().put(`/api/users/editUser/${user._id}`).set(auth(user.token)).send({ specialDiet: [] });
+    expect(res.body.specialDiet).toEqual([]);
+  });
+
   it("[comportamiento actual] dieta inválida -> 500", async () => {
     const user = await createUser();
     const res = await api()
