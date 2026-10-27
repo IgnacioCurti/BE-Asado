@@ -397,11 +397,11 @@ describe("PUT /api/users/editProfilePicture/:id", () => {
     expect(res.status).toBe(500);
   });
 
-  it("[BUG - comportamiento actual] sin archivo el servidor nunca responde", async () => {
+  it("sin archivo -> 400", async () => {
     const user = await createUser();
-    await expect(
-      api().put(`/api/users/editProfilePicture/${user._id}`).set(auth(user.token)).timeout(700)
-    ).rejects.toThrow(/timeout/i);
+    const res = await api().put(`/api/users/editProfilePicture/${user._id}`).set(auth(user.token));
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "No file was uploaded." });
   });
 
   it("cambiar la foto de otro usuario -> 403", async () => {

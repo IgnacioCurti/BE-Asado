@@ -313,11 +313,12 @@ describe("POST /api/purchaseReceipts/uploadFile/:purchaseReceipt", () => {
     expect(await countImages()).toBe(0);
   });
 
-  it("[BUG - comportamiento actual] sin archivo el servidor nunca responde", async () => {
+  it("sin archivo -> 400", async () => {
     const user = await createUser();
-    await expect(
-      api().post(`/api/purchaseReceipts/uploadFile/${newId()}`).set(auth(user.token)).timeout(700)
-    ).rejects.toThrow(/timeout/i);
+    const res = await api().post(`/api/purchaseReceipts/uploadFile/${newId()}`).set(auth(user.token));
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "No file was uploaded." });
+    expect(await countImages()).toBe(0);
   });
 });
 
