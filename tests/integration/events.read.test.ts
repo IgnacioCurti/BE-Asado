@@ -28,11 +28,13 @@ const PUBLIC_EVENT_KEYS = [
 ].sort();
 
 describe("GET /api/events/getEvents", () => {
-  it("devuelve todos los eventos (públicos y privados) ordenados por fecha descendente, sin poblar", async () => {
+  it("devuelve los públicos y los privados de los que es miembro, ordenados por fecha descendente, sin poblar", async () => {
     const user = await createUser();
+    const stranger = await createUser();
     const old = await createEvent({ organizer: user._id, title: "viejo", datetime: "2029-01-01T00:00:00Z" });
     const priv = await createEvent({ organizer: user._id, title: "privado", isPrivate: true, datetime: "2031-01-01T00:00:00Z" });
     const mid = await createEvent({ organizer: user._id, title: "medio", datetime: "2030-01-01T00:00:00Z" });
+    await createEvent({ organizer: stranger._id, title: "privado ajeno", isPrivate: true, datetime: "2032-01-01T00:00:00Z" });
 
     const res = await api().get("/api/events/getEvents").set(auth(user.token));
 
