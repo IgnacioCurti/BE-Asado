@@ -410,6 +410,17 @@ describe("PUT /api/users/editProfilePicture/:id", () => {
     expect(res.status).toBe(500);
   });
 
+  it("[comportamiento actual] un archivo de más de 5 MB se rechaza (500 de multer) y no se guarda", async () => {
+    const user = await createUser();
+    const big = Buffer.concat([PNG_BYTES, Buffer.alloc(5 * 1024 * 1024)]);
+    const res = await api()
+      .put(`/api/users/editProfilePicture/${user._id}`)
+      .set(auth(user.token))
+      .attach("file", big, { filename: "big.png", contentType: "image/png" });
+    expect(res.status).toBe(500);
+    expect(await countImages()).toBe(0);
+  });
+
   it("sin archivo -> 400", async () => {
     const user = await createUser();
     const res = await api().put(`/api/users/editProfilePicture/${user._id}`).set(auth(user.token));
