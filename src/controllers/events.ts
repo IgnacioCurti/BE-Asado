@@ -386,7 +386,11 @@ export async function editEvent(
         message: "The event has no shopping designees.",
       });
     await event.save();
-    await updateReminders(event);
+    if (event.state === "cancelled") {
+      await deleteReminders(event._id);
+    } else {
+      await updateReminders(event);
+    }
     return res.status(STATUS_CODES.OK).json(event);
   } catch (error: any) {
     return res

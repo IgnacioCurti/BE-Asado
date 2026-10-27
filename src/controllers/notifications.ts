@@ -46,6 +46,10 @@ export async function notifyEventStart(eventId: string): Promise<void> {
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
     }
+
+    if (event.state === "cancelled") {
+      return;
+    }
     const message: string = eventStartTemplate(eventId);
     for (const user of event.members) {
       if (!user.notifications.eventStart) continue;
@@ -73,6 +77,10 @@ export async function notifyPenalizationStart(eventId: string): Promise<void> {
 
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
+    }
+
+    if (event.state === "cancelled") {
+      return;
     }
 
     const debtors = await getEventsDebtors(eventId);
@@ -103,6 +111,10 @@ export async function notifyPenalizationOneWeek(
 
     if (!event) {
       throw new Error(`Event with ID ${eventId} not found.`);
+    }
+
+    if (event.state === "cancelled") {
+      return;
     }
 
     const debtors: IUser[] = await getEventsDebtors(eventId);

@@ -9,6 +9,7 @@ import {
   createUser,
   findReminders,
   newId,
+  updateEvent,
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 import { getEventsDebtors } from "../../src/utils/utils.js";
@@ -90,6 +91,17 @@ describe("GET /api/cron/reminderCheck", () => {
       expect(await countReminders()).toBe(0);
     });
 
+    it("no notifica si el evento está cancelado, y borra el recordatorio", async () => {
+      const a = await createUser({ notifications: ALL_ON });
+      const event = await createEvent({ organizer: a._id, members: [a._id], state: "cancelled" });
+      await createReminder({ event: event._id, type: "eventStart", datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
+      expect(await countReminders()).toBe(0);
+    });
+
     it("si el evento ya no existe, borra el recordatorio sin fallar", async () => {
       await createReminder({ event: newId(), type: "eventStart", datetime: hoursAgo(4) });
       const res = await api().get("/api/cron/reminderCheck");
@@ -160,6 +172,16 @@ describe("GET /api/cron/reminderCheck", () => {
       await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(sentEmails.map((m) => m.payload.to[0])).toEqual([{ email: "beto@gmail.com", name: "Beto" }]);
+    });
+
+    it("no notifica si el evento está cancelado", async () => {
+      const { event } = await debtScenario();
+      await updateEvent(event._id, { state: "cancelled" });
+      await createReminder({ event: event._id, type, datetime: hoursAgo(4) });
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails).toHaveLength(0);
     });
 
     it(`respeta notifications.${type} = false`, async () => {

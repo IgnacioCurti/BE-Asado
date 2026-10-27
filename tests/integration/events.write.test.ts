@@ -745,6 +745,20 @@ describe("PUT /api/events/editEvent/:id", () => {
     expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2020-01-10T20:30:00.000Z"]);
   });
 
+  it("cancelar el evento borra todos sus recordatorios", async () => {
+    const organizer = await createUser();
+    const created = await api()
+      .post("/api/events/createEvent")
+      .set(auth(organizer.token))
+      .send(eventBody(organizer, { isShoppingDesignee: true, penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+    await api()
+      .put(`/api/events/editEvent/${created.body._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ state: "cancelled", penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }))
+      .expect(200);
+    expect(await findReminders(created.body._id)).toEqual([]);
+  });
+
   it("[comportamiento actual] quitar la penalización NO borra sus recordatorios", async () => {
     const organizer = await createUser();
     const created = await api()
