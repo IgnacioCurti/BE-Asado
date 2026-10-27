@@ -46,6 +46,10 @@ const userSchema: mongoose.Schema<IUser> = new mongoose.Schema({
 
   verificationCode: { type: String, default: null },
 
+  verificationCodeExpiresAt: { type: Date, default: null },
+
+  verificationAttempts: { type: Number, default: 0 },
+
   cbu: { type: String, default: null },
 
   alias: { type: String, default: null },
