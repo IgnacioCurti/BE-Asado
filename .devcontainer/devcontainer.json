@@ -1,0 +1,27 @@
+{
+  "name": "BE-Asado (Node + Mongo)",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/BE-Asado",
+  "shutdownAction": "stopCompose",
+
+  "forwardPorts": [3600, 27017],
+  "portsAttributes": {
+    "3600": { "label": "API" },
+    "27017": { "label": "MongoDB", "onAutoForward": "silent" }
+  },
+
+  "postCreateCommand": "npm ci",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "mongodb.mongodb-vscode"
+      ]
+    }
+  },
+
+  "remoteUser": "node"
+}
