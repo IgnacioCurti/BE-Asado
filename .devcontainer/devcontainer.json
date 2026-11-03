@@ -18,7 +18,10 @@
       "extensions": [
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "mongodb.mongodb-vscode"
+        "mongodb.mongodb-vscode",
+        "PKief.material-icon-theme",
+        "eamodio.gitlens",
+        "formulahendry.auto-close-tag"
       ]
     }
   },
