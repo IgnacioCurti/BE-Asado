@@ -364,8 +364,8 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 
 ## 9. Plan de implementación (tentativo)
 
-1. **Cerrar los endpoints abiertos** de 5.3 (`WORKTODO.md` §2.3). No depende de los grupos y se puede hacer ya.
-2. Modelo `Group` + generación del código + tests unitarios.
+1. **Cerrar los endpoints abiertos** de 5.3 (`WORKTODO.md` §2.3). No depende de los grupos y se puede hacer ya. ✅ (PR #157)
+2. Modelo `Group` + generación del código + tests unitarios. ✅ (rama `t/groups-model`: `src/models/group.ts`, `src/modules/groups/groupCode.ts`, `GroupRepository.createWithUniqueCode`)
 3. Endpoints de grupo (crear, mis grupos, detalle, unirse, salir con borrado en cascada del grupo vacío, editar, makeAdmin, regenerateCode) + middlewares `groupMember`/`groupAdmin` + tests de integración.
 4. `Event.group` + cambios en `createEvent`, `subscribeToAnEvent`, `eventViewer` y los listados.
 5. Notificaciones por grupo + eliminar `deleteEvents()`.
