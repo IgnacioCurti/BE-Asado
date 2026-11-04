@@ -296,4 +296,8 @@ export class EventRepository extends BaseRepository<IEvent> {
       ])
       .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers | null>;
   }
+
+  findByOption(optionId: string): Promise<IEvent | null> {
+    return this.model.findOne({ options: optionId }).exec();
+  }
 }

@@ -8,6 +8,7 @@ import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRe
 import { transferReceiptService } from "../transferReceipts/index.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { UserRepository } from "../users/UserRepository.js";
+import { EventAccessPolicy } from "./EventAccessPolicy.js";
 import { EventController } from "./EventController.js";
 import { EventMapper } from "./EventMapper.js";
 import { EventRepository } from "./EventRepository.js";
@@ -30,4 +31,8 @@ const eventService = new EventService({
 });
 
 export const eventController = new EventController(eventService);
+export const eventAccessPolicy = new EventAccessPolicy(
+  new EventRepository(),
+  new TransferReceiptRepository()
+);
 export { EventService };
