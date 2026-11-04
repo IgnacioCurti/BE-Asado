@@ -17,7 +17,7 @@ type ImageAccess = "allowed" | "forbidden" | "unreferenced";
 
 export class ImageService {
   constructor(
-    private readonly images: Pick<ImageRepository, "findById" | "create">,
+    private readonly images: Pick<ImageRepository, "findById" | "create" | "deleteById">,
     private readonly users: Pick<UserRepository, "hasProfilePicture">,
     private readonly purchaseReceipts: Pick<PurchaseReceiptRepository, "findByImage">,
     private readonly transferReceipts: Pick<TransferReceiptRepository, "findByImage">,
@@ -46,6 +46,10 @@ export class ImageService {
       image: file.buffer,
     });
     return image._id;
+  }
+
+  async delete(imageId: mongoose.Types.ObjectId | string): Promise<void> {
+    await this.images.deleteById(String(imageId));
   }
 
   private async access(imageId: string, userId: string): Promise<ImageAccess> {
