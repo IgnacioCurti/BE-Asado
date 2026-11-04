@@ -13,6 +13,7 @@ import {
   IEventWithPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts,
   IEventWithTransferReceipts,
+  IEventWithTransferReceiptsPurchaseReceiptsRatings,
   IEventWithMembersTransferReceipts,
   IRating,
   IUserName,
@@ -241,5 +242,30 @@ export class EventRepository extends BaseRepository<IEvent> {
       .populate("purchaseReceipts")
       .populate("options")
       .exec() as unknown as Promise<IEventWithPurchaseReceiptsOptions | null>;
+  }
+
+  // Documento sin guardar, para ajustar campos antes del primer save.
+  build(fields: Record<string, unknown>): IEvent {
+    return new this.model(fields);
+  }
+
+  countPublic(): Promise<number> {
+    return this.model.countDocuments({ isPrivate: false }).exec();
+  }
+
+  findEndedOldestFirst(): Promise<IEvent[]> {
+    return this.model
+      .find({ state: { $in: ["finished", "cancelled"] } })
+      .sort({ datetime: "asc" })
+      .exec();
+  }
+
+  findByIdWithReceiptsAndRatings(
+    id: mongoose.Types.ObjectId
+  ): Promise<IEventWithTransferReceiptsPurchaseReceiptsRatings | null> {
+    return this.model
+      .findById(id)
+      .populate(["transferReceipts", "purchaseReceipts", "ratings"])
+      .exec() as unknown as Promise<IEventWithTransferReceiptsPurchaseReceiptsRatings | null>;
   }
 }

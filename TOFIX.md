@@ -65,3 +65,15 @@ PR, actualizando ese test.
   produce `amount: null` (división por 0 serializada como `NaN` → `null`).
 - **`POST /api/events/createEvent`**: si faltan campos obligatorios responde 500
   (error de validación de Mongoose) en lugar de 400.
+
+## Consistencia de datos
+
+- **Borrado de eventos sin transacción** (`DELETE /api/events/deleteEvent/:id` y la
+  limpieza automática al crear un evento): se borran comprobantes, imágenes,
+  calificaciones, recordatorios y el evento con llamadas separadas. Un fallo a
+  mitad deja documentos huérfanos. Envolverlo en una transacción requiere un
+  replica set (Atlas lo tiene; los tests usan `MongoMemoryServer` standalone y
+  habría que pasar a `MongoMemoryReplSet`).
+- **Limpieza automática al crear un evento**: cuenta solo los eventos públicos
+  para decidir si hay más de 6, pero borra eventos terminados o cancelados de
+  cualquier privacidad.
