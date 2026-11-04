@@ -4,7 +4,7 @@ import { User } from "../models/user.js";
 import { Image } from "../models/image.js";
 import { Event } from "../models/event.js";
 import { TransferReceipt } from "../models/transferReceipt.js";
-import { assignEventValues, calculateTransfersInfo } from "./events.js";
+import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
 import { imageService } from "../modules/images/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import {
@@ -87,12 +87,9 @@ export async function isDebtor(req: Request, res: Response): Promise<Response> {
         .populate({ path: "members", model: "User" });
     const debtorEvents: mongoose.Types.ObjectId[] = [];
     for (const event of events) {
-      const userBalances = assignEventValues(event.purchaseReceipts);
-      const transferInfo = calculateTransfersInfo(userBalances);
-
-      const userTransfer = transferInfo.find(
-        (t) => t.userId.equals(userId) && t.receiver
-      );
+      const userTransfer = paymentCalculator
+        .expectedTransfersFor(event.purchaseReceipts)
+        .find((t) => t.userId.equals(userId));
 
       if (userTransfer) {
         const receipt: ITransferReceipt | null = await TransferReceipt.findOne({

@@ -9,10 +9,7 @@ import {
 } from "../models/interfaces.js";
 import { Event } from "../models/event.js";
 import { isValidId } from "../core/validation/isValidId.js";
-import {
-  assignEventValues,
-  calculateTransfersInfo,
-} from "../controllers/events.js";
+import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
 
 function sendEmail(
   email: string,
@@ -92,13 +89,8 @@ async function getEventsDebtors(eventId: string): Promise<IUser[]> {
     throw new Error(`Event with ID ${eventId} not found.`);
   }
 
-  const userBalances: IUserBalance[] = assignEventValues(
-    event.purchaseReceipts
-  );
-  const transferInfo: ITransferInfo[] = calculateTransfersInfo(userBalances);
-  const expectedTransfers: ITransferInfo[] = transferInfo.filter(
-    (t) => t.receiver !== null
-  );
+  const expectedTransfers: ITransferInfo[] =
+    paymentCalculator.expectedTransfersFor(event.purchaseReceipts);
 
   const debtors: IUser[] = expectedTransfers
     .filter((transfer) => {

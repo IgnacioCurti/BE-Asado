@@ -5,10 +5,7 @@ import { Image } from "../models/image.js";
 import { imageService } from "../modules/images/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { nowArgentina } from "../utils/dates.js";
-import {
-  assignEventValues,
-  calculateTransfersInfo,
-} from "../controllers/events.js";
+import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
 import {
   IEvent,
   IEventWithMembersTransferReceipts,
@@ -121,12 +118,9 @@ async function expectedTransferOf(
       ],
     });
   if (!event) return undefined;
-  const transferInfo: ITransferInfo[] = calculateTransfersInfo(
-    assignEventValues(event.purchaseReceipts)
-  );
-  return transferInfo.find(
-    (t) => t.receiver !== null && t.userId.equals(userId)
-  );
+  return paymentCalculator
+    .expectedTransfersFor(event.purchaseReceipts)
+    .find((t) => t.userId.equals(userId));
 }
 
 export async function createTransferReceipt(
@@ -313,14 +307,8 @@ export async function isFinished(eventId: string): Promise<boolean> {
       })
       .populate({ path: "members", model: "User" });
 
-  const userBalances: IUserBalance[] = assignEventValues(
-    event.purchaseReceipts
-  );
-  const transferInfo: ITransferInfo[] = calculateTransfersInfo(userBalances);
-
-  const expectedTransfers: ITransferInfo[] = transferInfo.filter(
-    (t) => t.receiver !== null
-  );
+  const expectedTransfers: ITransferInfo[] =
+    paymentCalculator.expectedTransfersFor(event.purchaseReceipts);
 
   return expectedTransfers.every((transfer) =>
     event.transferReceipts.some(

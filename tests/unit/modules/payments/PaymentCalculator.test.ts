@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import mongoose from "mongoose";
-import {
-  assignEventValues,
-  calculateTransfersInfo,
-} from "../../../src/controllers/events.js";
+import { PaymentCalculator } from "../../../../src/modules/payments/PaymentCalculator.js";
 import {
   IPurchaseReceiptWithUsers,
   IUserBalance,
-} from "../../../src/models/interfaces.js";
+} from "../../../../src/models/interfaces.js";
+
+const calculator = new PaymentCalculator();
+const assignEventValues = (receipts: IPurchaseReceiptWithUsers[]) => calculator.assignBalances(receipts);
+const calculateTransfersInfo = (balances: IUserBalance[]) => calculator.calculateTransfers(balances);
 
 // Estas dos funciones son el núcleo del negocio (quién le debe cuánto a quién).
 // Los casos fijan el resultado EXACTO actual, incluido el orden y el redondeo.
@@ -229,5 +230,45 @@ describe("calculateTransfersInfo", () => {
       { userId: beto._id, userName: "Beto", amount: 83.34, receiver: receiverOf(ana) },
       { userId: ana._id, userName: "Ana", amount: 0, receiver: null },
     ]);
+  });
+});
+
+describe("PaymentCalculator.expectedTransfersFor", () => {
+  it("omite a quien no tiene que transferir (saldo 0)", () => {
+    // Ana pagó 100 entre Ana y Beto; Caro participa con 0 en otro recibo.
+    const result = calculator.expectedTransfersFor([
+      receipt(100, ana, [ana, beto]),
+      receipt(0, caro, [caro]),
+    ]);
+    expect(result).toEqual([
+      { userId: beto._id, userName: "Beto", amount: 50, receiver: receiverOf(ana) },
+    ]);
+  });
+
+  it("transfersFor incluye las de saldo 0 con receiver null", () => {
+    const result = calculator.transfersFor([receipt(100, ana, [ana, beto]), receipt(0, caro, [caro])]);
+    expect(result.some((t) => t.receiver === null)).toBe(true);
+    expect(result.filter((t) => t.receiver !== null)).toHaveLength(1);
+  });
+});
+
+describe("PaymentCalculator.memberCost", () => {
+  it("suma la parte del usuario en cada recibo donde participa, redondeando por recibo", () => {
+    const receipts = [
+      receipt(100, ana, [ana, beto, caro]), // 33.33
+      receipt(10, ana, [beto, dani]), // 5
+      receipt(50, ana, [caro]), // Beto no participa
+    ] as any;
+    expect(calculator.memberCost(receipts, beto._id)).toBe(38.33);
+  });
+
+  it("devuelve 0 si el usuario no participa en ningún recibo", () => {
+    expect(calculator.memberCost([receipt(100, ana, [ana])] as any, beto._id)).toBe(0);
+  });
+
+  it("coincide con el saldo de assignBalances cuando el usuario no es designado", () => {
+    const receipts = [receipt(100, ana, [ana, beto, caro]), receipt(7, caro, [beto, caro, dani])];
+    const betoBalance = calculator.assignBalances(receipts).find((b) => b.userId.equals(beto._id))!;
+    expect(calculator.memberCost(receipts as any, beto._id)).toBe(-betoBalance.totalCost);
   });
 });
