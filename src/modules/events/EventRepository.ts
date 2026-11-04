@@ -1,8 +1,12 @@
 import { BaseRepository } from "../../core/repositories/BaseRepository.js";
 import { Event } from "../../models/event.js";
-import mongoose from "mongoose";
+import mongoose, { FilterQuery } from "mongoose";
 import {
   IEvent,
+  IEventAmountCalculations,
+  IEventPopulatedWithOptions,
+  IEventWithPurchaseReceipts,
+  IPublicEventPreReduction,
   IEventAmountCalculationsWithTransfers,
   IEventWithMembersPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulated,
@@ -133,5 +137,81 @@ export class EventRepository extends BaseRepository<IEvent> {
       })
       .populate({ path: "members", model: "User" })
       .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null>;
+  }
+
+  // Públicos + privados donde el usuario es miembro.
+  private static visibleTo(userId: string) {
+    return { $or: [{ isPrivate: { $ne: true } }, { isPrivate: true, members: userId }] };
+  }
+
+  private static readonly SUMMARY_FIELDS: string =
+    "datetime description state chef shoppingDesignee memberLimit members title ratings isPrivate penalization penalizationStartDate";
+
+  findVisibleTo(userId: string): Promise<IEvent[]> {
+    return this.model
+      .find(EventRepository.visibleTo(userId))
+      .sort({ datetime: -1, _id: 1 })
+      .exec();
+  }
+
+  findPublicSummaries(): Promise<IPublicEventPreReduction[]> {
+    return this.findSummaries({ isPrivate: { $ne: true } });
+  }
+
+  findSummariesVisibleTo(userId: string): Promise<IPublicEventPreReduction[]> {
+    return this.findSummaries(EventRepository.visibleTo(userId));
+  }
+
+  private findSummaries(filter: FilterQuery<IEvent>): Promise<IPublicEventPreReduction[]> {
+    return this.model
+      .find(filter)
+      .select(EventRepository.SUMMARY_FIELDS)
+      .sort({ datetime: -1 })
+      .populate("chef", "name")
+      .populate("ratings")
+      .populate("shoppingDesignee")
+      .exec() as unknown as Promise<IPublicEventPreReduction[]>;
+  }
+
+  findByIdWithDetails(id: string): Promise<IEventPopulatedWithOptions | null> {
+    return this.model
+      .findById(id)
+      .populate("members")
+      .populate("chef")
+      .populate("organizer")
+      .populate("shoppingDesignee")
+      .populate("transferReceipts")
+      .populate("purchaseReceipts")
+      .populate({
+        path: "options",
+        populate: { path: "participants", model: "User", select: "name lastName _id" },
+      })
+      .exec() as unknown as Promise<IEventPopulatedWithOptions | null>;
+  }
+
+  // Recibos con usuarios populados y miembros, para calcular quién le debe a quién.
+  findByIdForAmounts(id: string): Promise<IEventAmountCalculations | null> {
+    return this.model
+      .findById(id)
+      .select("purchaseReceipts members")
+      .populate([
+        {
+          path: "purchaseReceipts",
+          populate: [
+            { path: "shoppingDesignee", model: "User" },
+            { path: "participants", model: "User" },
+          ],
+        },
+        { path: "members", model: "User" },
+      ])
+      .exec() as unknown as Promise<IEventAmountCalculations | null>;
+  }
+
+  // Recibos populados sin sus usuarios (participants quedan como ids).
+  findByIdWithPurchaseReceiptIds(id: string): Promise<IEventWithPurchaseReceipts | null> {
+    return this.model
+      .findById(id)
+      .populate("purchaseReceipts")
+      .exec() as unknown as Promise<IEventWithPurchaseReceipts | null>;
   }
 }

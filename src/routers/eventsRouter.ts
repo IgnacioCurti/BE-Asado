@@ -1,12 +1,5 @@
 import express from "express";
 import {
-  getEvents,
-  getPublicEvents,
-  getPublicAndPrivateEvents,
-  getEventById,
-  getMembersAndReceiptsInfo,
-  getMembersAmount,
-  getMemberIndividualCost,
   createEvent,
   subscribeToAnEvent,
   unsubscribeFromEvent,
@@ -20,25 +13,34 @@ import {
   eventOrganizer,
   shoppingDesigneeOrEventOrganizer,
 } from "../middleware/middleware.js";
+import { asyncHandler } from "../core/http/asyncHandler.js";
+import { eventController } from "../modules/events/index.js";
 
 const eventRouter: express.Router = express.Router();
 
-eventRouter.get("/getEvents", auth, getEvents);
+eventRouter.get("/getEvents", auth, asyncHandler(eventController.list));
 
-eventRouter.get("/getPublicEvents", getPublicEvents);
+eventRouter.get("/getPublicEvents", asyncHandler(eventController.listPublic));
 
-eventRouter.get("/getPublicAndPrivateEvents", auth, getPublicAndPrivateEvents);
+eventRouter.get(
+  "/getPublicAndPrivateEvents",
+  auth,
+  asyncHandler(eventController.listPublicAndPrivate)
+);
 
-eventRouter.get("/getEventById/:id", getEventById);
+eventRouter.get("/getEventById/:id", asyncHandler(eventController.getById));
 
-eventRouter.get("/getMembersAndReceiptsInfo/:event", getMembersAndReceiptsInfo);
+eventRouter.get(
+  "/getMembersAndReceiptsInfo/:event",
+  asyncHandler(eventController.getMembersAndReceiptsInfo)
+);
 
-eventRouter.get("/getMembersAmount/:event", getMembersAmount);
+eventRouter.get("/getMembersAmount/:event", asyncHandler(eventController.getMembersAmount));
 
 eventRouter.get(
   "/getMemberIndividualCost/:user/:event",
   auth,
-  getMemberIndividualCost
+  asyncHandler(eventController.getMemberIndividualCost)
 );
 
 eventRouter.post("/createEvent", auth, createEvent);
