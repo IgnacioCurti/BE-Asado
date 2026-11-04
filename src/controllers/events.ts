@@ -7,7 +7,7 @@ import { PurchaseReceipt } from "../models/purchaseReceipt.js";
 import { Image } from "../models/image.js";
 import { Rating } from "../models/rating.js";
 import { Reminder } from "../models/reminder.js";
-import { membersWhoHaveUploaded } from "./transferReceipts.js";
+import { transferReceiptService } from "../modules/transferReceipts/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { nowArgentina } from "../utils/dates.js";
 import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
@@ -155,7 +155,7 @@ export async function getMembersAndReceiptsInfo(
   res: Response
 ): Promise<Response> {
   try {
-    const answer: IMemberWhoHasUploaded[] = await membersWhoHaveUploaded(
+    const answer: IMemberWhoHasUploaded[] = await transferReceiptService.membersWhoHaveUploaded(
       req.params.event
     );
     return res.status(STATUS_CODES.OK).json(answer);

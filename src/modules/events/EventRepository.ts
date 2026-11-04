@@ -6,6 +6,9 @@ import {
   IEventAmountCalculationsWithTransfers,
   IEventWithMembersPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulated,
+  IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts,
+  IEventWithTransferReceipts,
+  IEventWithMembersTransferReceipts,
   IRating,
   IUserName,
 } from "../../models/interfaces.js";
@@ -98,5 +101,37 @@ export class EventRepository extends BaseRepository<IEvent> {
         },
       ])
       .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulated | null>;
+  }
+
+  findByIdWithTransferReceipts(id: string | mongoose.Types.ObjectId): Promise<IEventWithTransferReceipts | null> {
+    return this.model
+      .findById(id)
+      .populate("transferReceipts")
+      .exec() as unknown as Promise<IEventWithTransferReceipts | null>;
+  }
+
+  findByIdWithMembersAndTransferReceipts(id: string): Promise<IEventWithMembersTransferReceipts | null> {
+    return this.model
+      .findById(id)
+      .populate("members transferReceipts")
+      .exec() as unknown as Promise<IEventWithMembersTransferReceipts | null>;
+  }
+
+  // Todo lo necesario para saber si el evento terminó de pagarse.
+  findByIdWithPaymentData(
+    id: mongoose.Types.ObjectId
+  ): Promise<IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null> {
+    return this.model
+      .findById(id)
+      .populate({ path: "transferReceipts" })
+      .populate({
+        path: "purchaseReceipts",
+        populate: [
+          { path: "shoppingDesignee", model: "User" },
+          { path: "participants", model: "User" },
+        ],
+      })
+      .populate({ path: "members", model: "User" })
+      .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null>;
   }
 }
