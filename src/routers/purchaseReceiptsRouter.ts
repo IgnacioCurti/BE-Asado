@@ -1,55 +1,49 @@
 import express from "express";
 import {
-  getPurchaseReceiptsByEvent,
-  getPurchaseReceiptById,
-  assignMembersToReceipt,
-  uploadFilePurchaseReceipt,
-  createPurchaseReceipt,
-  deletePurchaseReceipt,
-} from "../controllers/purchaseReceipts.js";
-import {
   auth,
   shoppingDesignee,
   eventParticipant,
   multerUpload,
 } from "../middleware/middleware.js";
+import { asyncHandler } from "../core/http/asyncHandler.js";
+import { purchaseReceiptController as controller } from "../modules/purchaseReceipts/index.js";
 
 const purchaseReceiptRouter: express.Router = express.Router();
+
+// Mensaje por defecto con punto final, como respondía el controlador original.
+const handle = (handler: Parameters<typeof asyncHandler>[0]) =>
+  asyncHandler(handler, "Internal server error.");
 
 purchaseReceiptRouter.get(
   "/getPurchaseReceiptsByEvent/:event",
   [auth, eventParticipant],
-  getPurchaseReceiptsByEvent
+  handle(controller.listByEvent)
 );
 
 purchaseReceiptRouter.get(
   "/getPurchaseReceiptById/:id/:event",
   [auth, eventParticipant],
-  getPurchaseReceiptById
+  handle(controller.getById)
 );
 
-purchaseReceiptRouter.put(
-  "/assignMembersToReceipt",
-  [auth],
-  assignMembersToReceipt
-);
+purchaseReceiptRouter.put("/assignMembersToReceipt", [auth], handle(controller.assignMembers));
 
 purchaseReceiptRouter.post(
   "/uploadFile/:purchaseReceipt",
   [auth, multerUpload.single("file")],
-  uploadFilePurchaseReceipt
+  handle(controller.uploadFile)
 );
 
 purchaseReceiptRouter.post(
   "/createPurchaseReceipt/:event",
   [auth, shoppingDesignee],
-  createPurchaseReceipt
+  handle(controller.create)
 );
 
 purchaseReceiptRouter.delete(
   "/deletePurchaseReceipt/:id/:event",
   [auth, shoppingDesignee],
-  deletePurchaseReceipt
+  handle(controller.delete)
 );
 
 export default purchaseReceiptRouter;
