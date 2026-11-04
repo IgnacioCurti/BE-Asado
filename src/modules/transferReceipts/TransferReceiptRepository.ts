@@ -18,4 +18,8 @@ export class TransferReceiptRepository extends BaseRepository<ITransferReceipt> 
   ): Promise<ITransferReceipt | null> {
     return this.model.findOne({ event: eventId, user: userId }).exec();
   }
+
+  async existsApprovedForEvent(eventId: mongoose.Types.ObjectId): Promise<boolean> {
+    return Boolean(await this.model.exists({ event: eventId, hasPaid: true }));
+  }
 }

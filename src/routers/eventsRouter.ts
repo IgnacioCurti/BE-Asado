@@ -1,10 +1,6 @@
 import express from "express";
 import {
   createEvent,
-  subscribeToAnEvent,
-  unsubscribeFromEvent,
-  editRoles,
-  editEvent,
   deleteEvent,
 } from "../controllers/events.js";
 import {
@@ -48,21 +44,21 @@ eventRouter.post("/createEvent", auth, createEvent);
 eventRouter.put(
   "/subscribeToAnEvent/:id/:event",
   [auth, sameUser],
-  subscribeToAnEvent
+  asyncHandler(eventController.subscribe)
 );
 
 eventRouter.put(
   "/unsubscribeFromEvent/:id/:event",
   [auth, sameUser],
-  unsubscribeFromEvent
+  asyncHandler(eventController.unsubscribe)
 );
 
-eventRouter.put("/editRoles/:id", auth, editRoles);
+eventRouter.put("/editRoles/:id", auth, asyncHandler(eventController.editRoles));
 
 eventRouter.put(
   "/editEvent/:id",
   [auth, shoppingDesigneeOrEventOrganizer],
-  editEvent
+  asyncHandler(eventController.edit)
 );
 
 eventRouter.delete("/deleteEvent/:id", [auth, eventOrganizer], deleteEvent);
