@@ -18,6 +18,7 @@ import { Rating } from "../../src/models/rating.js";
 import { Option } from "../../src/models/option.js";
 import { Reminder } from "../../src/models/reminder.js";
 import { Image } from "../../src/models/image.js";
+import { Group } from "../../src/models/group.js";
 
 export const JWT_SECRET: string = process.env.JWTPRIVATEKEY as string;
 export const DEFAULT_PASSWORD: string = "Secret123!";
@@ -377,9 +378,68 @@ export async function countImages(): Promise<number> {
   return Image.countDocuments();
 }
 
+// ---------------------------------------------------------------- groups
+
+export interface GroupFixture {
+  _id: Id;
+  name: string;
+  code: string;
+  admins: Id[];
+  members: Id[];
+  coverPhotos: Id[];
+  createdAt: string;
+}
+
+let groupCodeCounter: number = 0;
+const CODE_ALPHABET: string = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+// Código válido y distinto en cada llamada (no depende del generador real).
+export function uniqueGroupCode(): string {
+  let n: number = groupCodeCounter++;
+  let code: string = "";
+  for (let i = 0; i < 8; i++) {
+    code = CODE_ALPHABET[n % CODE_ALPHABET.length] + code;
+    n = Math.floor(n / CODE_ALPHABET.length);
+  }
+  return code;
+}
+
+/** Por defecto el primer miembro es el único admin. */
+export async function createGroup(data: {
+  members: Id[];
+  admins?: Id[];
+  name?: string;
+  code?: string;
+  coverPhotos?: Id[];
+}): Promise<GroupFixture> {
+  const doc = await Group.create({
+    name: data.name ?? "Los del asado",
+    code: data.code ?? uniqueGroupCode(),
+    members: data.members,
+    admins: data.admins ?? data.members.slice(0, 1),
+    coverPhotos: data.coverPhotos ?? [],
+  });
+  return plain<GroupFixture>(doc);
+}
+
+export async function findGroup(id: Id): Promise<GroupFixture | null> {
+  const doc = await Group.findById(id).lean();
+  return doc ? plain<GroupFixture>(doc) : null;
+}
+
+export async function countGroups(): Promise<number> {
+  return Group.countDocuments();
+}
+
+/** Inserta n grupos donde el usuario es miembro (para probar el límite por usuario). */
+export async function insertGroupsForMember(userId: Id, n: number): Promise<void> {
+  await Group.insertMany(
+    Array.from({ length: n }, () => ({ name: "Relleno", code: uniqueGroupCode(), members: [userId], admins: [userId] }))
+  );
+}
+
 // ---------------------------------------------------------------- fallas
 
-/** Hace fallar toda lectura/consulta a la base hasta el final del test (restoreMocks la deshace). */
 // Hace fallar el próximo deleteMany de un modelo (p. ej. "Option"), para
 // probar que un borrado en varias colecciones es atómico.
 export function simulateDeleteFailure(modelName: string, message: string): void {
@@ -388,6 +448,7 @@ export function simulateDeleteFailure(modelName: string, message: string): void 
   });
 }
 
+/** Hace fallar toda lectura/consulta a la base hasta el final del test (restoreMocks la deshace). */
 export function simulateDatabaseFailure(message: string): void {
   vi.spyOn(mongoose.Query.prototype, "exec").mockRejectedValue(new Error(message));
 }

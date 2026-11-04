@@ -4,6 +4,7 @@ import { NextFunction } from "express";
 import { isValidId } from "../core/validation/isValidId.js";
 import { sendError } from "../core/http/sendError.js";
 import { eventAccessPolicy as policy } from "../modules/events/index.js";
+import { groupAccessPolicy } from "../modules/groups/index.js";
 import { jwtPrivateKey } from "../config.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { Request, Response } from "express";
@@ -119,3 +120,12 @@ export const optionManager = guard((req) =>
 
 // Votar: el usuario tiene que ser miembro del evento al que pertenece la opción.
 export const optionVoter = guard((req) => policy.assertOptionVoter(req.params.id, req.user._id));
+
+// Grupos (:group): miembro o admin del grupo (GROUPS_FEATURE.md §5.1).
+export const groupMember = guard((req) =>
+  groupAccessPolicy.assertMember(req.params.group, req.user._id)
+);
+
+export const groupAdmin = guard((req) =>
+  groupAccessPolicy.assertAdmin(req.params.group, req.user._id)
+);
