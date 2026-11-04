@@ -74,4 +74,12 @@ export class EventController {
     });
     return res.status(STATUS_CODES.OK).json(event);
   };
+
+  create = async (req: Request, res: Response): Promise<Response> => {
+    return res.status(STATUS_CODES.CREATED).json(await this.service.create(req.body));
+  };
+
+  delete = async (req: Request, res: Response): Promise<Response> => {
+    return res.status(STATUS_CODES.OK).json(await this.service.delete(req.params.id));
+  };
 }

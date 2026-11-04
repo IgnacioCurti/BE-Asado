@@ -1,9 +1,5 @@
 import express from "express";
 import {
-  createEvent,
-  deleteEvent,
-} from "../controllers/events.js";
-import {
   auth,
   sameUser,
   eventOrganizer,
@@ -39,7 +35,7 @@ eventRouter.get(
   asyncHandler(eventController.getMemberIndividualCost)
 );
 
-eventRouter.post("/createEvent", auth, createEvent);
+eventRouter.post("/createEvent", auth, asyncHandler(eventController.create));
 
 eventRouter.put(
   "/subscribeToAnEvent/:id/:event",
@@ -61,6 +57,10 @@ eventRouter.put(
   asyncHandler(eventController.edit)
 );
 
-eventRouter.delete("/deleteEvent/:id", [auth, eventOrganizer], deleteEvent);
+eventRouter.delete(
+  "/deleteEvent/:id",
+  [auth, eventOrganizer],
+  asyncHandler(eventController.delete)
+);
 
 export default eventRouter;

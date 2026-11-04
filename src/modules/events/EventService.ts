@@ -6,14 +6,17 @@ import {
   IEventPopulatedWithOptions,
   IEventWithPurchaseReceipts,
   IEventWithPurchaseReceiptsOptions,
+  IEventWithTransferReceiptsPurchaseReceiptsRatings,
   IMemberWhoHasUploaded,
   IPublicEvent,
   ITransferInfo,
 } from "../../models/interfaces.js";
+import { ImageService } from "../images/ImageService.js";
 import { ReminderScheduler } from "../notifications/ReminderScheduler.js";
 import { OptionRepository } from "../options/OptionRepository.js";
 import { PaymentCalculator } from "../payments/PaymentCalculator.js";
 import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRepository.js";
+import { RatingRepository } from "../ratings/RatingRepository.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
 import { UserRepository } from "../users/UserRepository.js";
@@ -25,6 +28,25 @@ export const eventNotFoundMessage: string = "The event with the given ID was not
 const STATES_WITH_COSTS: string[] = ["finished", "readyforpayment"];
 const STATES_WITHOUT_UNSUBSCRIBE: string[] = ["closed", "readyforpayment"];
 const userNotFoundMessage: string = "The user with the given ID was not found.";
+
+// Al crear un evento, si hay más de MAX_PUBLIC_EVENTS públicos se borran los
+// terminados o cancelados más viejos (de cualquier privacidad).
+const MAX_PUBLIC_EVENTS: number = 6;
+
+// Campos que un cliente puede enviar al crear un evento. El estado y las
+// colecciones relacionadas (recibos, ratings, opciones) las maneja el backend.
+const CREATE_EVENT_FIELDS: string[] = [
+  "title",
+  "datetime",
+  "description",
+  "memberLimit",
+  "members",
+  "organizer",
+  "shoppingDesignee",
+  "isPrivate",
+  "penalization",
+  "penalizationStartDate",
+];
 
 // Estados a los que se puede pasar con editEvent. "finished" lo pone el sistema
 // cuando se aprueban todos los pagos; cancelled y finished son finales.
@@ -65,13 +87,20 @@ export interface EventServiceDeps {
     | "save"
     | "addMemberIfAllowed"
     | "findByIdWithReceiptsAndOptions"
+    | "build"
+    | "countPublic"
+    | "findEndedOldestFirst"
+    | "findByIdWithReceiptsAndRatings"
+    | "deleteById"
   >;
   paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
   users: Pick<UserRepository, "findById">;
-  purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save">;
+  purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save" | "deleteById">;
   options: Pick<OptionRepository, "save">;
-  transferReceipts: Pick<TransferReceiptRepository, "existsApprovedForEvent">;
-  reminders: Pick<ReminderScheduler, "syncWithEvent" | "cancelForEvent">;
+  transferReceipts: Pick<TransferReceiptRepository, "existsApprovedForEvent" | "deleteById">;
+  ratings: Pick<RatingRepository, "deleteById">;
+  images: Pick<ImageService, "delete">;
+  reminders: Pick<ReminderScheduler, "syncWithEvent" | "cancelForEvent" | "scheduleNewEvent">;
   payments: Pick<PaymentCalculator, "transfersFor" | "memberCost">;
   mapper: EventMapper;
 }
@@ -211,6 +240,66 @@ export class EventService {
     if (event.state === "cancelled") await this.deps.reminders.cancelForEvent(event._id);
     else await this.deps.reminders.syncWithEvent(event);
     return event;
+  }
+
+  // El organizador, los miembros y los designados vienen del body (ver TOFIX.md).
+  async create(body: Record<string, any>): Promise<IEvent> {
+    const fields: Record<string, unknown> = Object.fromEntries(
+      CREATE_EVENT_FIELDS.filter((field) => field in body).map((field) => [field, body[field]])
+    );
+    const event: IEvent = this.deps.events.build(fields);
+    event.chef = body.isChef ? body.organizer : null;
+    if (body.isShoppingDesignee) event.shoppingDesignee.push(body.organizer);
+    await this.deps.events.save(event);
+
+    await this.pruneEndedEvents();
+    if (!event.isPrivate) await this.deps.reminders.scheduleNewEvent(event._id);
+    await this.deps.reminders.syncWithEvent(event);
+    return event;
+  }
+
+  // Borra el evento y todo lo que cuelga de él (sin transacción: un fallo a
+  // mitad puede dejar documentos huérfanos).
+  async delete(eventId: string): Promise<IEvent> {
+    const event: IEvent = await this.getEvent(eventId);
+    await this.deleteRelatedDocuments(event._id);
+    await this.deps.reminders.cancelForEvent(event._id);
+    await this.deps.events.deleteById(eventId);
+    return event;
+  }
+
+  private async pruneEndedEvents(): Promise<void> {
+    const totalPublic: number = await this.deps.events.countPublic();
+    if (totalPublic <= MAX_PUBLIC_EVENTS) return;
+    const ended: IEvent[] = await this.deps.events.findEndedOldestFirst();
+    const toDelete: IEvent[] = ended.slice(0, Math.min(totalPublic - MAX_PUBLIC_EVENTS, ended.length));
+    for (const event of toDelete) {
+      await this.deps.reminders.cancelForEvent(event._id);
+      await this.deleteRelatedDocuments(event._id);
+      await this.deps.events.deleteById(String(event._id));
+    }
+  }
+
+  // Comprobantes de transferencia y de compra (con sus imágenes) y calificaciones.
+  private async deleteRelatedDocuments(eventId: mongoose.Types.ObjectId): Promise<void> {
+    const event: IEventWithTransferReceiptsPurchaseReceiptsRatings | null =
+      await this.deps.events.findByIdWithReceiptsAndRatings(eventId);
+
+    await Promise.all(
+      event!.transferReceipts.map(async (receipt) => {
+        if (receipt.image) await this.deps.images.delete(receipt.image);
+        await this.deps.transferReceipts.deleteById(String(receipt._id));
+      })
+    );
+    await Promise.all(
+      event!.purchaseReceipts.map(async (receipt) => {
+        if (receipt.image) await this.deps.images.delete(receipt.image);
+        await this.deps.purchaseReceipts.deleteById(String(receipt._id));
+      })
+    );
+    await Promise.all(
+      event!.ratings.map((rating) => this.deps.ratings.deleteById(String(rating._id)))
+    );
   }
 
   private async getEvent(id: string): Promise<IEvent> {
