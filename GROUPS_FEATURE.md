@@ -366,7 +366,7 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 
 1. **Cerrar los endpoints abiertos** de 5.3 (`WORKTODO.md` §2.3). No depende de los grupos y se puede hacer ya. ✅ (PR #157)
 2. Modelo `Group` + generación del código + tests unitarios. ✅ (rama `t/groups-model`: `src/models/group.ts`, `src/modules/groups/groupCode.ts`, `GroupRepository.createWithUniqueCode`)
-3. Endpoints de grupo (crear, mis grupos, detalle, unirse, salir con borrado en cascada del grupo vacío, editar, makeAdmin, regenerateCode) + middlewares `groupMember`/`groupAdmin` + tests de integración.
+3. Endpoints de grupo (crear, mis grupos, detalle, unirse, salir con borrado en cascada del grupo vacío, editar, makeAdmin, regenerateCode) + middlewares `groupMember`/`groupAdmin` + tests de integración. ✅ (rama `t/groups-model`). Salir aplica por ahora solo las reglas propias del grupo (único admin → 409, último miembro → se borra el grupo con sus portadas); las reglas que dependen de eventos (deudas, roles en `closed`/`readyforpayment`, baja de los `available`, borrar los eventos del grupo) se agregan en el paso 4 (hay un `TODO` en `GroupService.leave`).
 4. `Event.group` + cambios en `createEvent`, `subscribeToAnEvent`, `eventViewer` y los listados.
 5. Notificaciones por grupo + eliminar `deleteEvents()`.
 6. Portadas (subir, borrar y acceso en `getImage`).
