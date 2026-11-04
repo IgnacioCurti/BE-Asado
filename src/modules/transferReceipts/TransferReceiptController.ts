@@ -10,8 +10,10 @@ export class TransferReceiptController {
     return res.status(STATUS_CODES.OK).json(await this.service.listByEvent(req.params.event));
   };
 
-  getById = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.getById(req.params.id));
+  getById = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.service.getById(req.params.id, req.user._id));
   };
 
   uploadFile = async (req: IRequestWithUser, res: Response): Promise<Response> => {
@@ -37,7 +39,7 @@ export class TransferReceiptController {
   };
 
   approve = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.approve(req.params.id));
+    return res.status(STATUS_CODES.OK).json(await this.service.approve(req.params.id, req.params.event));
   };
 
   delete = async (req: Request, res: Response): Promise<Response> => {

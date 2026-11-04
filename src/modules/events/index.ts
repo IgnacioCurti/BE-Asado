@@ -1,5 +1,3 @@
-import { imageService } from "../images/index.js";
-import { RatingRepository } from "../ratings/RatingRepository.js";
 import { ReminderRepository } from "../notifications/ReminderRepository.js";
 import { ReminderScheduler } from "../notifications/ReminderScheduler.js";
 import { OptionRepository } from "../options/OptionRepository.js";
@@ -25,8 +23,6 @@ const eventService = new EventService({
   purchaseReceipts: new PurchaseReceiptRepository(),
   options: new OptionRepository(),
   transferReceipts: new TransferReceiptRepository(),
-  ratings: new RatingRepository(),
-  images: imageService,
   reminders: reminderScheduler,
 });
 

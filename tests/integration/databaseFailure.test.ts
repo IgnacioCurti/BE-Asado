@@ -12,9 +12,9 @@ const routes: [string, string, boolean][] = [
   ["get", "/api/events/getEvents", true],
   ["get", "/api/events/getPublicEvents", false],
   ["get", "/api/events/getPublicAndPrivateEvents", true],
-  ["get", `/api/events/getEventById/${ID}`, false],
-  ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`, false],
-  ["get", `/api/events/getMembersAmount/${ID}`, false],
+  ["get", `/api/events/getEventById/${ID}`, true],
+  ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`, true],
+  ["get", `/api/events/getMembersAmount/${ID}`, true],
   ["get", `/api/events/getMemberIndividualCost/${ID}/${ID}`, true],
   ["put", `/api/events/editRoles/${ID}`, true],
   ["put", `/api/events/editEvent/${ID}`, true],
@@ -26,7 +26,7 @@ const routes: [string, string, boolean][] = [
   ["get", `/api/purchaseReceipts/getPurchaseReceiptsByEvent/${ID}`, true],
   ["post", `/api/purchaseReceipts/createPurchaseReceipt/${ID}`, true],
   ["get", `/api/ratings/getRatingFromUser/${ID}/${ID}`, true],
-  ["post", `/api/ratings/createRating/${ID}/${ID}`, true],
+  ["post", `/api/ratings/createRating/${ID}/:me`, true],
   ["get", `/api/transferReceipts/getTransferReceiptsByEvent/${ID}`, true],
   ["get", `/api/transferReceipts/getTransferReceiptsById/${ID}`, true],
   ["delete", `/api/transferReceipts/deleteTransferReceipt/${ID}`, true],
@@ -43,7 +43,7 @@ describe("Falla de base de datos", () => {
     simulateDatabaseFailure("DB caída");
     let req = (api() as any)[method](path.replace(":me", user._id));
     if (needsAuth) req = req.set(auth(user.token));
-    const res = await req.send({});
+    const res = await req.send({ score: 4 });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ message: "DB caída" });
   });

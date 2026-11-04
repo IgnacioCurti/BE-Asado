@@ -99,7 +99,7 @@ describe("Ciclo de vida completo de un evento", () => {
 
     // 7. Pasa a "listo para pagar": Beto debe 1000 + 500, Caro debe 1000
     await api().put(`/api/events/editEvent/${eventId}`).set(auth(ana.token)).send({ ...editBase, state: "readyforpayment" }).expect(200);
-    const amounts = await api().get(`/api/events/getMembersAmount/${eventId}`).expect(200);
+    const amounts = await api().get(`/api/events/getMembersAmount/${eventId}`).set(auth(ana.token)).expect(200);
     const anaReceiver = {
       receiverId: ana.id,
       receiverName: "Ana",
@@ -128,7 +128,7 @@ describe("Ciclo de vida completo de un evento", () => {
       .attach("file", PNG_BYTES, { filename: "comprobante.png", contentType: "image/png" })
       .expect(200);
     expect((await api().get(`/api/users/hasPendingTransfers/${ana.id}`).set(auth(ana.token))).body).toEqual([eventId]);
-    const info = await api().get(`/api/events/getMembersAndReceiptsInfo/${eventId}`).expect(200);
+    const info = await api().get(`/api/events/getMembersAndReceiptsInfo/${eventId}`).set(auth(ana.token)).expect(200);
     expect(info.body.map((m: any) => [m.userName, m.hasUploaded, m.hasReceiptApproved])).toEqual([
       ["Ana", false, null],
       ["Beto", true, false],
@@ -137,7 +137,7 @@ describe("Ciclo de vida completo de un evento", () => {
 
     // 9. Ana aprueba a Beto; Caro le pagó en efectivo
     await api().put(`/api/transferReceipts/approveTransferReceipt/${transfer.body._id}/${eventId}`).set(auth(ana.token)).expect(200);
-    expect((await api().get(`/api/events/getEventById/${eventId}`)).body.state).toBe("readyforpayment");
+    expect((await api().get(`/api/events/getEventById/${eventId}`).set(auth(ana.token))).body.state).toBe("readyforpayment");
     await api()
       .post(`/api/transferReceipts/approvePaymentWithoutReceipt/${eventId}/${caro.id}`)
       .set(auth(ana.token))
@@ -145,7 +145,7 @@ describe("Ciclo de vida completo de un evento", () => {
       .expect(201);
 
     // 10. Todos pagaron -> finalizado
-    const finished = await api().get(`/api/events/getEventById/${eventId}`).expect(200);
+    const finished = await api().get(`/api/events/getEventById/${eventId}`).set(auth(ana.token)).expect(200);
     expect(finished.body.state).toBe("finished");
     expect((await api().get(`/api/users/isDebtor/${beto.id}`).set(auth(beto.token))).body).toEqual([]);
     expect((await api().get(`/api/users/hasPendingTransfers/${ana.id}`).set(auth(ana.token))).body).toEqual([]);
@@ -158,7 +158,7 @@ describe("Ciclo de vida completo de un evento", () => {
 
     // 12. Ana borra el evento
     await api().delete(`/api/events/deleteEvent/${eventId}`).set(auth(ana.token)).expect(200);
-    expect((await api().get(`/api/events/getEventById/${eventId}`)).status).toBe(404);
+    expect((await api().get(`/api/events/getEventById/${eventId}`).set(auth(ana.token))).status).toBe(404);
     expect((await api().get(`/api/transferReceipts/getTransferReceiptsById/${transfer.body._id}`).set(auth(ana.token))).status).toBe(404);
   });
 });

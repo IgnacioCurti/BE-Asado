@@ -53,33 +53,42 @@ describe("POST /api/ratings/createRating/:event/:user", () => {
     expect(res.body).toEqual({ message: "The event with the given ID was not found." });
   });
 
-  it.each([0, 6, 3.5])("[comportamiento actual] score %s inválido -> 500 y no se guarda", async (score) => {
+  it.each([0, 6, 3.5, "abc", null])("score %s inválido -> 400 y no se guarda", async (score) => {
     const { member, event } = await scenario();
     const res = await api().post(`/api/ratings/createRating/${event._id}/${member._id}`).set(auth(member.token)).send({ score });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "The score must be an integer between 1 and 5." });
     expect(await countRatings()).toBe(0);
     expect((await findEvent(event._id))!.ratings).toEqual([]);
   });
 
-  it("[comportamiento actual] actualizar con score inválido -> 500 y conserva el anterior", async () => {
+  it("score numérico enviado como string se acepta", async () => {
+    const { member, event } = await scenario();
+    const res = await api().post(`/api/ratings/createRating/${event._id}/${member._id}`).set(auth(member.token)).send({ score: "4" });
+    expect(res.status).toBe(200);
+    expect(res.body.score).toBe(4);
+  });
+
+  it("actualizar con score inválido -> 400 y conserva el anterior", async () => {
     const { member, event } = await scenario();
     const existing = await createRating({ event: event._id, user: member._id, score: 3 });
     const res = await api().post(`/api/ratings/createRating/${event._id}/${member._id}`).set(auth(member.token)).send({ score: 9 });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     expect((await findRating(existing._id))!.score).toBe(3);
   });
 
-  it("[SEGURIDAD - comportamiento actual] se puede calificar en nombre de otro miembro", async () => {
+  it("calificar en nombre de otro miembro -> 403 y no se guarda", async () => {
     const { organizer, member, event } = await scenario();
     const res = await api().post(`/api/ratings/createRating/${event._id}/${member._id}`).set(auth(organizer.token)).send({ score: 1 });
-    expect(res.status).toBe(200);
-    expect(res.body.user).toBe(member._id);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "Access denied. Users can only rate events for themselves." });
+    expect(await countRatings()).toBe(0);
   });
 
-  it("[comportamiento actual] id de usuario mal formado -> 500", async () => {
+  it("id de usuario o de evento mal formado -> 400", async () => {
     const { member, event } = await scenario();
-    const res = await api().post(`/api/ratings/createRating/${event._id}/abc`).set(auth(member.token)).send({ score: 4 });
-    expect(res.status).toBe(500);
+    expect((await api().post(`/api/ratings/createRating/${event._id}/abc`).set(auth(member.token)).send({ score: 4 })).status).toBe(400);
+    expect((await api().post(`/api/ratings/createRating/abc/${member._id}`).set(auth(member.token)).send({ score: 4 })).status).toBe(400);
   });
 });
 

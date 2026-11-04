@@ -96,6 +96,9 @@ export const eventParticipant = guard((req) =>
   policy.assertMember(req.params.event, req.user._id)
 );
 
+// Estado de pagos y montos de un evento (:event).
+export const eventViewer = guard((req) => policy.assertViewer(req.params.event, req.user._id));
+
 export const shoppingDesignee = guard((req) =>
   policy.assertShoppingDesignee(req.params.event, req.user._id)
 );

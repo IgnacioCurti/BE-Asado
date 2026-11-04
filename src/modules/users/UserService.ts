@@ -1,4 +1,5 @@
 import bcrypt from "bcrypt";
+import { isValidId } from "../../core/validation/isValidId.js";
 import mongoose from "mongoose";
 import { BadRequestError, NotFoundError } from "../../core/errors/AppError.js";
 import {
@@ -80,7 +81,7 @@ export class UserService {
   // Eventos donde el usuario es designado de compras y tiene transferencias
   // dirigidas a él sin aprobar.
   async getEventsWithPendingTransfers(designeeId: string): Promise<mongoose.Types.ObjectId[]> {
-    // new ObjectId lanza con un id mal formado; se conserva la respuesta 500 actual.
+    if (!isValidId(designeeId)) throw new BadRequestError("Invalid ObjectID");
     const designee = new mongoose.Types.ObjectId(designeeId);
     const events: IEventAmountCalculationsWithTransfers[] =
       await this.deps.events.findReadyForPaymentByDesignee(designee);
@@ -113,9 +114,9 @@ export class UserService {
     user.name = input.name ? input.name : user.name;
     user.lastName = input.lastName ? input.lastName : user.lastName;
     user.specialDiet = input.specialDiet ?? user.specialDiet;
-    // alias y cbu se reemplazan siempre: enviarlos vacíos los borra.
-    user.alias = input.alias;
-    user.cbu = input.cbu;
+    // Si no se envían se conservan; enviarlos vacíos ("" o null) los borra.
+    if (input.alias !== undefined) user.alias = input.alias;
+    if (input.cbu !== undefined) user.cbu = input.cbu;
     user.notifications = {
       newEvent: input.notifications?.newEvent ?? user.notifications.newEvent,
       eventStart: input.notifications?.eventStart ?? user.notifications.eventStart,

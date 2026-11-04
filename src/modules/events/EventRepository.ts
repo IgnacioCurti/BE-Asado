@@ -1,5 +1,12 @@
 import { BaseRepository } from "../../core/repositories/BaseRepository.js";
+import { UserRepository } from "../users/UserRepository.js";
 import { Event } from "../../models/event.js";
+import { Image } from "../../models/image.js";
+import { Option } from "../../models/option.js";
+import { PurchaseReceipt } from "../../models/purchaseReceipt.js";
+import { Rating } from "../../models/rating.js";
+import { Reminder } from "../../models/reminder.js";
+import { TransferReceipt } from "../../models/transferReceipt.js";
 import mongoose, { FilterQuery } from "mongoose";
 import {
   IEvent,
@@ -14,11 +21,13 @@ import {
   IEventWithPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts,
   IEventWithTransferReceipts,
-  IEventWithTransferReceiptsPurchaseReceiptsRatings,
   IEventWithMembersTransferReceipts,
   IRating,
   IUserName,
 } from "../../models/interfaces.js";
+
+// Usuarios poblados sin hash de contraseña ni datos del código de recuperación.
+const SAFE_USER: string = UserRepository.SAFE_PROJECTION;
 
 export interface IEventWithRatings extends Omit<IEvent, "ratings"> {
   ratings: IRating[];
@@ -67,11 +76,11 @@ export class EventRepository extends BaseRepository<IEvent> {
       .populate({
         path: "purchaseReceipts",
         populate: [
-          { path: "shoppingDesignee", model: "User" },
-          { path: "participants", model: "User" },
+          { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+          { path: "participants", model: "User", select: SAFE_USER },
         ],
       })
-      .populate({ path: "members", model: "User" })
+      .populate({ path: "members", model: "User", select: SAFE_USER })
       .exec() as unknown as Promise<IEventWithMembersPurchaseReceiptsPopulated[]>;
   }
 
@@ -85,11 +94,11 @@ export class EventRepository extends BaseRepository<IEvent> {
         {
           path: "purchaseReceipts",
           populate: [
-            { path: "shoppingDesignee", model: "User" },
-            { path: "participants", model: "User" },
+            { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+            { path: "participants", model: "User", select: SAFE_USER },
           ],
         },
-        { path: "members", model: "User" },
+        { path: "members", model: "User", select: SAFE_USER },
         { path: "transferReceipts", model: "TransferReceipt" },
       ])
       .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers[]>;
@@ -102,8 +111,8 @@ export class EventRepository extends BaseRepository<IEvent> {
         {
           path: "purchaseReceipts",
           populate: [
-            { path: "shoppingDesignee", model: "User" },
-            { path: "participants", model: "User" },
+            { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+            { path: "participants", model: "User", select: SAFE_USER },
           ],
         },
       ])
@@ -120,7 +129,8 @@ export class EventRepository extends BaseRepository<IEvent> {
   findByIdWithMembersAndTransferReceipts(id: string): Promise<IEventWithMembersTransferReceipts | null> {
     return this.model
       .findById(id)
-      .populate("members transferReceipts")
+      .populate("members", SAFE_USER)
+      .populate("transferReceipts")
       .exec() as unknown as Promise<IEventWithMembersTransferReceipts | null>;
   }
 
@@ -134,11 +144,11 @@ export class EventRepository extends BaseRepository<IEvent> {
       .populate({
         path: "purchaseReceipts",
         populate: [
-          { path: "shoppingDesignee", model: "User" },
-          { path: "participants", model: "User" },
+          { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+          { path: "participants", model: "User", select: SAFE_USER },
         ],
       })
-      .populate({ path: "members", model: "User" })
+      .populate({ path: "members", model: "User", select: SAFE_USER })
       .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null>;
   }
 
@@ -172,17 +182,17 @@ export class EventRepository extends BaseRepository<IEvent> {
       .sort({ datetime: -1 })
       .populate("chef", "name")
       .populate("ratings")
-      .populate("shoppingDesignee")
+      .populate("shoppingDesignee", SAFE_USER)
       .exec() as unknown as Promise<IPublicEventPreReduction[]>;
   }
 
   findByIdWithDetails(id: string): Promise<IEventPopulatedWithOptions | null> {
     return this.model
       .findById(id)
-      .populate("members")
-      .populate("chef")
-      .populate("organizer")
-      .populate("shoppingDesignee")
+      .populate("members", SAFE_USER)
+      .populate("chef", SAFE_USER)
+      .populate("organizer", SAFE_USER)
+      .populate("shoppingDesignee", SAFE_USER)
       .populate("transferReceipts")
       .populate("purchaseReceipts")
       .populate({
@@ -201,11 +211,11 @@ export class EventRepository extends BaseRepository<IEvent> {
         {
           path: "purchaseReceipts",
           populate: [
-            { path: "shoppingDesignee", model: "User" },
-            { path: "participants", model: "User" },
+            { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+            { path: "participants", model: "User", select: SAFE_USER },
           ],
         },
-        { path: "members", model: "User" },
+        { path: "members", model: "User", select: SAFE_USER },
       ])
       .exec() as unknown as Promise<IEventAmountCalculations | null>;
   }
@@ -251,29 +261,58 @@ export class EventRepository extends BaseRepository<IEvent> {
   }
 
   countPublic(): Promise<number> {
-    return this.model.countDocuments({ isPrivate: false }).exec();
+    return this.model.countDocuments({ isPrivate: { $ne: true } }).exec();
   }
 
-  findEndedOldestFirst(): Promise<IEvent[]> {
+  // Mismo criterio de "público" que countPublic, para que la limpieza solo
+  // borre eventos que cuentan para el límite.
+  findPublicEndedOldestFirst(): Promise<IEvent[]> {
     return this.model
-      .find({ state: { $in: ["finished", "cancelled"] } })
+      .find({ isPrivate: { $ne: true }, state: { $in: ["finished", "cancelled"] } })
       .sort({ datetime: "asc" })
       .exec();
   }
 
-  findByIdWithReceiptsAndRatings(
-    id: mongoose.Types.ObjectId
-  ): Promise<IEventWithTransferReceiptsPurchaseReceiptsRatings | null> {
-    return this.model
-      .findById(id)
-      .populate(["transferReceipts", "purchaseReceipts", "ratings"])
-      .exec() as unknown as Promise<IEventWithTransferReceiptsPurchaseReceiptsRatings | null>;
+  // Borra los eventos con todo lo que cuelga de ellos (comprobantes y sus
+  // imágenes, calificaciones, opciones y recordatorios) en una transacción:
+  // o se borra todo o no se borra nada. Requiere un replica set.
+  async deleteCascade(eventIds: mongoose.Types.ObjectId[]): Promise<void> {
+    if (eventIds.length === 0) return;
+    const session: mongoose.ClientSession = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const events = await this.model
+          .find({ _id: { $in: eventIds } })
+          .select("transferReceipts purchaseReceipts ratings options")
+          .session(session)
+          .exec();
+        const ids = (field: "transferReceipts" | "purchaseReceipts" | "ratings" | "options") =>
+          events.flatMap((event) => event[field] as mongoose.Types.ObjectId[]);
+        const transferIds = ids("transferReceipts");
+        const purchaseIds = ids("purchaseReceipts");
+        const receipts = [
+          ...(await TransferReceipt.find({ _id: { $in: transferIds } }).select("image").session(session).exec()),
+          ...(await PurchaseReceipt.find({ _id: { $in: purchaseIds } }).select("image").session(session).exec()),
+        ];
+        const imageIds = receipts.map((receipt) => receipt.image).filter(Boolean);
+
+        await Image.deleteMany({ _id: { $in: imageIds } }).session(session).exec();
+        await TransferReceipt.deleteMany({ _id: { $in: transferIds } }).session(session).exec();
+        await PurchaseReceipt.deleteMany({ _id: { $in: purchaseIds } }).session(session).exec();
+        await Rating.deleteMany({ _id: { $in: ids("ratings") } }).session(session).exec();
+        await Option.deleteMany({ _id: { $in: ids("options") } }).session(session).exec();
+        await Reminder.deleteMany({ event: { $in: eventIds } }).session(session).exec();
+        await this.model.deleteMany({ _id: { $in: eventIds } }).session(session).exec();
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   findByIdWithMembers(id: string): Promise<IEventWithMembers | null> {
     return this.model
       .findById(id)
-      .populate("members")
+      .populate("members", SAFE_USER)
       .exec() as unknown as Promise<IEventWithMembers | null>;
   }
 
@@ -287,14 +326,35 @@ export class EventRepository extends BaseRepository<IEvent> {
         {
           path: "purchaseReceipts",
           populate: [
-            { path: "shoppingDesignee", model: "User" },
-            { path: "participants", model: "User" },
+            { path: "shoppingDesignee", model: "User", select: SAFE_USER },
+            { path: "participants", model: "User", select: SAFE_USER },
           ],
         },
-        { path: "members", model: "User" },
-        { path: "transferReceipts", populate: { path: "user", model: "User" } },
+        { path: "members", model: "User", select: SAFE_USER },
+        { path: "transferReceipts", populate: { path: "user", model: "User", select: SAFE_USER } },
       ])
       .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers | null>;
+  }
+
+  // Aplica un cambio de roles de un solo usuario si, al escribir, el evento sigue
+  // disponible y el chef sigue siendo el esperado (evita que dos tomen el chef).
+  updateRolesIfAllowed(
+    eventId: mongoose.Types.ObjectId,
+    change: {
+      chef?: { from: mongoose.Types.ObjectId | null; to: mongoose.Types.ObjectId | null };
+      addDesignee?: mongoose.Types.ObjectId;
+      removeDesignee?: mongoose.Types.ObjectId;
+    }
+  ): Promise<IEvent | null> {
+    const filter: FilterQuery<IEvent> = { _id: eventId, state: "available" };
+    const update: Record<string, unknown> = {};
+    if (change.chef) {
+      filter.chef = change.chef.from;
+      update.$set = { chef: change.chef.to };
+    }
+    if (change.addDesignee) update.$addToSet = { shoppingDesignee: change.addDesignee };
+    if (change.removeDesignee) update.$pull = { shoppingDesignee: change.removeDesignee };
+    return this.model.findOneAndUpdate(filter, update, { new: true }).exec();
   }
 
   findByOption(optionId: string): Promise<IEvent | null> {

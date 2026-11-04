@@ -79,14 +79,14 @@ describe("GET /api/purchaseReceipts/getPurchaseReceiptById/:id/:event", () => {
     expect(res.body).toMatchObject({ _id: receipt._id, shoppingDesignee: designee._id, participants: [member._id] });
   });
 
-  it("[comportamiento actual] devuelve comprobantes de OTRO evento si se pasa un evento del que se es miembro", async () => {
+  it("un comprobante de OTRO evento -> 404, aunque se pase un evento del que se es miembro", async () => {
     const { member, event } = await closedEventWithDesignee();
     const stranger = await createUser();
     const otherEvent = await createEvent({ organizer: stranger._id });
     const foreign = await createPurchaseReceipt({ event: otherEvent._id, shoppingDesignee: stranger._id, amount: 99, participants: [] });
     const res = await api().get(`/api/purchaseReceipts/getPurchaseReceiptById/${foreign._id}/${event._id}`).set(auth(member.token));
-    expect(res.status).toBe(200);
-    expect(res.body.amount).toBe(99);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The purchase receipt with the given ID was not found." });
   });
 
   it("comprobante inexistente -> 404", async () => {
@@ -96,10 +96,10 @@ describe("GET /api/purchaseReceipts/getPurchaseReceiptById/:id/:event", () => {
     expect(res.body).toEqual({ message: "The purchase receipt with the given ID was not found." });
   });
 
-  it("[comportamiento actual] id de comprobante mal formado -> 500", async () => {
+  it("id de comprobante mal formado -> 400", async () => {
     const { member, event } = await closedEventWithDesignee();
     const res = await api().get(`/api/purchaseReceipts/getPurchaseReceiptById/abc/${event._id}`).set(auth(member.token));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
   });
 
   it("no miembro -> 403", async () => {
@@ -241,7 +241,7 @@ describe("PUT /api/purchaseReceipts/assignMembersToReceipt", () => {
     expect((await findPurchaseReceipt(r2._id))!.participants).toEqual([designee._id, member._id]);
   });
 
-  it("[comportamiento actual] si uno no existe responde 404, pero los anteriores ya quedaron modificados", async () => {
+  it("si uno no existe responde 404 y no modifica ninguno", async () => {
     const { designee, member, event } = await closedEventWithDesignee();
     const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [designee._id] });
     const res = await api()
@@ -250,18 +250,49 @@ describe("PUT /api/purchaseReceipts/assignMembersToReceipt", () => {
       .send({ receipts: [{ id: r1._id, participants: [member._id] }, { id: newId(), participants: [] }] });
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "One or more purchase receipts were not found" });
-    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([member._id]);
+    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([designee._id]);
   });
 
-  it("[SEGURIDAD - comportamiento actual] cualquier usuario autenticado puede reasignar participantes de cualquier evento", async () => {
-    const { designee, event } = await closedEventWithDesignee();
+  it("quien no es comprador del evento del comprobante -> 403 (aunque sea miembro)", async () => {
+    const { designee, member, event } = await closedEventWithDesignee();
     const intruder = await createUser();
+    const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [designee._id] });
+    for (const user of [intruder, member]) {
+      const res = await api()
+        .put("/api/purchaseReceipts/assignMembersToReceipt")
+        .set(auth(user.token))
+        .send({ receipts: [{ id: r1._id, participants: [] }] });
+      expect(res.status).toBe(403);
+    }
+    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([designee._id]);
+  });
+
+  it("un comprador no puede tocar comprobantes de otro evento -> 403 y no modifica nada", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const stranger = await createUser();
+    const otherEvent = await createEvent({ organizer: stranger._id, members: [stranger._id], shoppingDesignee: [stranger._id], state: "closed" });
+    const mine = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [designee._id] });
+    const foreign = await createPurchaseReceipt({ event: otherEvent._id, shoppingDesignee: stranger._id, amount: 10, participants: [stranger._id] });
+    const res = await api()
+      .put("/api/purchaseReceipts/assignMembersToReceipt")
+      .set(auth(designee.token))
+      .send({ receipts: [{ id: mine._id, participants: [] }, { id: foreign._id, participants: [] }] });
+    expect(res.status).toBe(403);
+    expect((await findPurchaseReceipt(mine._id))!.participants).toEqual([designee._id]);
+    expect((await findPurchaseReceipt(foreign._id))!.participants).toEqual([stranger._id]);
+  });
+
+  it("participantes que no son miembros del evento -> 400", async () => {
+    const { designee, event } = await closedEventWithDesignee();
+    const outsider = await createUser();
     const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: designee._id, amount: 10, participants: [designee._id] });
     const res = await api()
       .put("/api/purchaseReceipts/assignMembersToReceipt")
-      .set(auth(intruder.token))
-      .send({ receipts: [{ id: r1._id, participants: [] }] });
-    expect(res.status).toBe(200);
+      .set(auth(designee.token))
+      .send({ receipts: [{ id: r1._id, participants: [designee._id, outsider._id] }] });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "All participants must be members of the event." });
+    expect((await findPurchaseReceipt(r1._id))!.participants).toEqual([designee._id]);
   });
 
   it("lista vacía -> 200 sin cambios", async () => {
@@ -270,10 +301,14 @@ describe("PUT /api/purchaseReceipts/assignMembersToReceipt", () => {
     expect(res.status).toBe(200);
   });
 
-  it("[comportamiento actual] sin 'receipts' -> 500", async () => {
+  it("sin 'receipts' o con un id mal formado -> 400", async () => {
     const user = await createUser();
-    const res = await api().put("/api/purchaseReceipts/assignMembersToReceipt").set(auth(user.token)).send({});
-    expect(res.status).toBe(500);
+    expect((await api().put("/api/purchaseReceipts/assignMembersToReceipt").set(auth(user.token)).send({})).status).toBe(400);
+    const res = await api()
+      .put("/api/purchaseReceipts/assignMembersToReceipt")
+      .set(auth(user.token))
+      .send({ receipts: [{ id: "abc", participants: [] }] });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -412,14 +447,14 @@ describe("DELETE /api/purchaseReceipts/deletePurchaseReceipt/:id/:event", () => 
     expect(res.status).toBe(403);
   });
 
-  it("[SEGURIDAD - comportamiento actual] el comprador de un evento puede borrar comprobantes de otro evento", async () => {
+  it("el comprador de un evento no puede borrar comprobantes de otro evento -> 404", async () => {
     const { designee, event } = await closedEventWithDesignee();
     const stranger = await createUser();
     const otherEvent = await createEvent({ organizer: stranger._id, shoppingDesignee: [stranger._id], state: "closed" });
     const foreign = await createPurchaseReceipt({ event: otherEvent._id, shoppingDesignee: stranger._id, amount: 10, participants: [] });
     const res = await api().delete(`/api/purchaseReceipts/deletePurchaseReceipt/${foreign._id}/${event._id}`).set(auth(designee.token));
-    expect(res.status).toBe(200);
-    expect(await findPurchaseReceipt(foreign._id)).toBeNull();
+    expect(res.status).toBe(404);
+    expect(await findPurchaseReceipt(foreign._id)).not.toBeNull();
   });
 
   it("si el comprobante no está en la lista del evento, la lista no cambia", async () => {

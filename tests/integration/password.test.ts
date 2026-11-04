@@ -114,11 +114,11 @@ describe("PUT /api/password/verifyCode", () => {
     expect(res.status).toBe(200);
   });
 
-  it("código incorrecto -> 400 y el body es un string JSON (no un objeto)", async () => {
+  it("código incorrecto -> 400 con { message }, igual que recover", async () => {
     const user = await createUser({ verificationCodePlain: "123456" });
     const res = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "654321" });
     expect(res.status).toBe(400);
-    expect(res.body).toBe("Invalid verification code.");
+    expect(res.body).toEqual({ message: "Invalid verification code." });
   });
 
   it("usuario inexistente -> 404", async () => {
@@ -146,7 +146,7 @@ describe("PUT /api/password/verifyCode", () => {
     const user = await createUser({ verificationCodePlain: "123456" });
     for (let i = 0; i < 4; i++) {
       const res = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "000000" });
-      expect(res.body).toBe("Invalid verification code.");
+      expect(res.body).toEqual({ message: "Invalid verification code." });
     }
     const fifth = await api().put("/api/password/verifyCode").send({ email: user.email, verificationCode: "000000" });
     expect(fifth.status).toBe(400);

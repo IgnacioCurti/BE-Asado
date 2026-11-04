@@ -19,14 +19,6 @@ const codeCheckMessages: Record<Exclude<CodeCheck, "valid">, string> = {
   locked: "Too many failed attempts. Request a new code.",
 };
 
-// Código de verificación incorrecto (todavía quedan intentos). Es un error
-// propio porque verifyCode lo responde con un formato distinto al resto.
-export class InvalidVerificationCodeError extends BadRequestError {
-  constructor() {
-    super(codeCheckMessages.invalid);
-  }
-}
-
 export interface LoginResult {
   id: string;
   name: string;
@@ -105,7 +97,6 @@ export class AuthService {
   private async assertValidCode(user: IUser, code: string): Promise<void> {
     const check: CodeCheck = await this.checkVerificationCode(user, code);
     if (check === "valid") return;
-    if (check === "invalid") throw new InvalidVerificationCodeError();
     throw new BadRequestError(codeCheckMessages[check]);
   }
 

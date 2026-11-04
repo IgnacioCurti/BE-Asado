@@ -10,8 +10,10 @@ import {
 // acceso a la base; recibe los recibos ya cargados (con usuarios populados).
 // Todos los montos se redondean a 2 decimales por recibo.
 export class PaymentCalculator {
-  // Parte de cada participante en un recibo.
+  // Parte de cada participante en un recibo. Sin participantes nadie lo paga
+  // (y al designado no se le acredita nada).
   shareOf(receipt: { amount: number; participants: unknown[] }): number {
+    if (receipt.participants.length === 0) return 0;
     return Number((receipt.amount / receipt.participants.length).toFixed(2));
   }
 

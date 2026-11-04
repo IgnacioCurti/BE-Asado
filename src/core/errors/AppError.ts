@@ -32,3 +32,9 @@ export class NotFoundError extends AppError {
     super(STATUS_CODES.NOT_FOUND, message);
   }
 }
+
+export class ConflictError extends AppError {
+  constructor(message: string) {
+    super(STATUS_CODES.CONFLICT, message);
+  }
+}

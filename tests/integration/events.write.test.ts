@@ -23,6 +23,7 @@ import {
   findReminders,
   newId,
   remindersByType,
+  simulateDeleteFailure,
   updateEvent,
   UserFixture,
 } from "../helpers/fixtures.js";
@@ -89,25 +90,46 @@ describe("POST /api/events/createEvent", () => {
     expect(res.body.chef).toBeNull();
   });
 
-  it("[comportamiento actual] shoppingDesignee del body se respeta y se le suma el organizador si isShoppingDesignee", async () => {
+  it("shoppingDesignee del body se ignora: solo isShoppingDesignee suma al organizador", async () => {
     const organizer = await createUser();
     const other = await createUser();
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
       .send(eventBody(organizer, { shoppingDesignee: [other._id], isShoppingDesignee: true }));
-    expect(res.body.shoppingDesignee).toEqual([other._id, organizer._id]);
+    expect(res.body.shoppingDesignee).toEqual([organizer._id]);
   });
 
-  it("[comportamiento actual] el organizador se toma del body, no del token", async () => {
+  it("el organizador se toma del token, no del body", async () => {
     const caller = await createUser();
     const someoneElse = await createUser();
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(caller.token))
-      .send(eventBody(someoneElse));
+      .send(eventBody(someoneElse, { members: [caller._id], isChef: true, isShoppingDesignee: true }));
     expect(res.status).toBe(201);
-    expect(res.body.organizer).toBe(someoneElse._id);
+    expect(res.body).toMatchObject({
+      organizer: caller._id,
+      members: [caller._id],
+      chef: caller._id,
+      shoppingDesignee: [caller._id],
+    });
+  });
+
+  it("members del body solo puede sumar al organizador: los demás ids se ignoran", async () => {
+    const organizer = await createUser();
+    const other = await createUser();
+    const res = await api()
+      .post("/api/events/createEvent")
+      .set(auth(organizer.token))
+      .send(eventBody(organizer, { members: [other._id, organizer._id] }));
+    expect(res.body.members).toEqual([organizer._id]);
+
+    const withoutMe = await api()
+      .post("/api/events/createEvent")
+      .set(auth(organizer.token))
+      .send(eventBody(organizer, { members: [other._id] }));
+    expect(withoutMe.body.members).toEqual([]);
   });
 
   it("[comportamiento actual] el organizador no se agrega automáticamente como miembro", async () => {
@@ -128,15 +150,15 @@ describe("POST /api/events/createEvent", () => {
     expect(res.body).toMatchObject({ isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" });
   });
 
-  it.each(["title", "description", "datetime", "memberLimit", "organizer"])(
-    "[comportamiento actual] sin %s -> 500 y no crea nada",
+  it.each(["title", "description", "datetime", "memberLimit"])(
+    "sin %s -> 400 y no crea nada",
     async (field) => {
       const organizer = await createUser();
       const res = await api()
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
         .send(eventBody(organizer, { [field]: undefined }));
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(400);
       expect(res.body.message).toContain(field);
       expect(await countEvents()).toBe(0);
     }
@@ -342,14 +364,15 @@ describe("POST /api/events/createEvent", () => {
       expect(await countEvents()).toBe(6);
     });
 
-    it("[comportamiento actual] los privados no cuentan para el límite, pero sí pueden ser borrados", async () => {
+    it("los privados no cuentan para el límite y nunca se borran", async () => {
       const organizer = await createUser();
       const [privOld] = await seedFinished(organizer, 1, { isPrivate: true, year: 2000 });
       const pubs = await seedFinished(organizer, 6, { year: 2020 });
-      // 6 públicos + 1 nuevo = 7 -> borra 1, el finalizado más viejo (que es privado)
+      // 6 públicos + 1 nuevo = 7 -> borra 1, el público finalizado más viejo
       await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
-      expect(await findEvent(privOld._id)).toBeNull();
-      expect(await findEvent(pubs[0]._id)).not.toBeNull();
+      expect(await findEvent(privOld._id)).not.toBeNull();
+      expect(await findEvent(pubs[0]._id)).toBeNull();
+      expect(await findEvent(pubs[1]._id)).not.toBeNull();
     });
 
     it("al borrar un evento viejo borra también sus comprobantes, imágenes, ratings y recordatorios", async () => {
@@ -582,52 +605,113 @@ describe("PUT /api/events/unsubscribeFromEvent/:id/:event", () => {
 });
 
 describe("PUT /api/events/editRoles/:id", () => {
-  it("asigna chef y compradores", async () => {
+  // El body es el estado completo de los roles; solo se aceptan cambios que
+  // afecten al usuario del token (GROUPS_FEATURE.md §4.4.2).
+  async function setup(state = "available", extra: Record<string, unknown> = {}) {
     const organizer = await createUser();
-    const a = await createUser();
-    const b = await createUser();
-    const event = await createEvent({ organizer: organizer._id, members: [organizer._id, a._id, b._id] });
-    const res = await api()
-      .put(`/api/events/editRoles/${event._id}`)
-      .set(auth(organizer.token))
-      .send({ chef: a._id, shoppingDesignee: [a._id, b._id] });
+    const member = await createUser();
+    const other = await createUser();
+    const event = await createEvent({
+      organizer: organizer._id,
+      members: [organizer._id, member._id, other._id],
+      state,
+      ...extra,
+    });
+    return { organizer, member, other, event };
+  }
+
+  const editRoles = (eventId: string, token: string, body: Record<string, unknown>) =>
+    api().put(`/api/events/editRoles/${eventId}`).set(auth(token)).send(body);
+
+  it("un miembro se asigna como chef y como comprador", async () => {
+    const { member, event } = await setup();
+    const res = await editRoles(event._id, member.token, { chef: member._id, shoppingDesignee: [member._id] });
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ chef: a._id, shoppingDesignee: [a._id, b._id] });
-    expect(await findEvent(event._id)).toMatchObject({ chef: a._id, shoppingDesignee: [a._id, b._id] });
+    expect(res.body).toMatchObject({ chef: member._id, shoppingDesignee: [member._id] });
+    expect(await findEvent(event._id)).toMatchObject({ chef: member._id, shoppingDesignee: [member._id] });
   });
 
-  it("chef vacío o ausente lo deja en null", async () => {
-    const organizer = await createUser();
-    const event = await createEvent({ organizer: organizer._id, chef: organizer._id });
-    const res = await api()
-      .put(`/api/events/editRoles/${event._id}`)
-      .set(auth(organizer.token))
-      .send({ chef: "", shoppingDesignee: [] });
+  it("se suma como comprador sin tocar a los demás compradores", async () => {
+    const { member, other, event } = await setup("available", { shoppingDesignee: [] });
+    await editRoles(event._id, other.token, { chef: null, shoppingDesignee: [other._id] }).expect(200);
+    const res = await editRoles(event._id, member.token, { chef: null, shoppingDesignee: [other._id, member._id] });
+    expect(res.status).toBe(200);
+    expect(res.body.shoppingDesignee).toEqual([other._id, member._id]);
+  });
+
+  it("cada uno suelta su propio rol (chef vacío o ausente lo libera)", async () => {
+    const { member, event } = await setup("available");
+    await updateEvent(event._id, { chef: member._id, shoppingDesignee: [member._id] });
+    const res = await editRoles(event._id, member.token, { chef: "", shoppingDesignee: [] });
+    expect(res.status).toBe(200);
     expect(res.body.chef).toBeNull();
     expect(res.body.shoppingDesignee).toEqual([]);
   });
 
-  it("[SEGURIDAD - comportamiento actual] cualquier usuario autenticado puede cambiar los roles", async () => {
-    const organizer = await createUser();
-    const intruder = await createUser();
-    const event = await createEvent({ organizer: organizer._id });
-    const res = await api()
-      .put(`/api/events/editRoles/${event._id}`)
-      .set(auth(intruder.token))
-      .send({ chef: intruder._id, shoppingDesignee: [intruder._id] });
-    expect(res.status).toBe(200);
-    expect((await findEvent(event._id))!.shoppingDesignee).toEqual([intruder._id]);
+  it("asignarle un rol a otro miembro -> 403", async () => {
+    const { organizer, member, event } = await setup();
+    expect((await editRoles(event._id, organizer.token, { chef: member._id, shoppingDesignee: [] })).status).toBe(403);
+    expect((await editRoles(event._id, organizer.token, { chef: null, shoppingDesignee: [member._id] })).status).toBe(403);
+    expect(await findEvent(event._id)).toMatchObject({ chef: null, shoppingDesignee: [] });
   });
 
-  it("[comportamiento actual] permite asignar roles a no-miembros", async () => {
-    const organizer = await createUser();
+  it("quitarle el rol a otro -> 403", async () => {
+    const { organizer, member, event } = await setup();
+    await updateEvent(event._id, { chef: member._id, shoppingDesignee: [member._id] });
+    const res = await editRoles(event._id, organizer.token, { chef: null, shoppingDesignee: [] });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "Access denied. Users can only take or release their own roles." });
+    expect(await findEvent(event._id)).toMatchObject({ chef: member._id, shoppingDesignee: [member._id] });
+  });
+
+  it("chef ocupado por otro -> 409", async () => {
+    const { member, other, event } = await setup();
+    await updateEvent(event._id, { chef: other._id });
+    const res = await editRoles(event._id, member.token, { chef: member._id, shoppingDesignee: [] });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ message: "The event already has a chef." });
+    expect((await findEvent(event._id))!.chef).toBe(other._id);
+  });
+
+  it("dos miembros toman el chef a la vez: queda uno solo y el otro recibe 409", async () => {
+    const { member, other, event } = await setup();
+    const results = await Promise.all([
+      editRoles(event._id, member.token, { chef: member._id, shoppingDesignee: [] }),
+      editRoles(event._id, other.token, { chef: other._id, shoppingDesignee: [] }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    const winner = results.find((r) => r.status === 200)!.body.chef;
+    expect((await findEvent(event._id))!.chef).toBe(winner);
+  });
+
+  it("quien no es miembro del evento -> 403", async () => {
+    const { event } = await setup();
     const outsider = await createUser();
-    const event = await createEvent({ organizer: organizer._id });
-    const res = await api()
-      .put(`/api/events/editRoles/${event._id}`)
-      .set(auth(organizer.token))
-      .send({ chef: outsider._id, shoppingDesignee: [outsider._id] });
+    const res = await editRoles(event._id, outsider.token, { chef: outsider._id, shoppingDesignee: [outsider._id] });
+    expect(res.status).toBe(403);
+  });
+
+  it.each(["closed", "readyforpayment", "finished", "cancelled"])(
+    "con el evento en %s los roles están congelados -> 409",
+    async (state) => {
+      const { member, event } = await setup(state, { shoppingDesignee: [] });
+      const res = await editRoles(event._id, member.token, { chef: null, shoppingDesignee: [member._id] });
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ message: "Roles can only change while the event is available." });
+    }
+  );
+
+  it("sin cambios responde 200 en cualquier estado", async () => {
+    const { member, event } = await setup("closed", { shoppingDesignee: [] });
+    await updateEvent(event._id, { shoppingDesignee: [member._id] });
+    const res = await editRoles(event._id, member.token, { chef: null, shoppingDesignee: [member._id] });
     expect(res.status).toBe(200);
+  });
+
+  it("shoppingDesignee que no es un array o con ids mal formados -> 400", async () => {
+    const { member, event } = await setup();
+    expect((await editRoles(event._id, member.token, { shoppingDesignee: member._id })).status).toBe(400);
+    expect((await editRoles(event._id, member.token, { shoppingDesignee: ["abc"] })).status).toBe(400);
   });
 
   it("evento inexistente -> 404", async () => {
@@ -636,10 +720,10 @@ describe("PUT /api/events/editRoles/:id", () => {
     expect(res.status).toBe(404);
   });
 
-  it("[comportamiento actual] id mal formado -> 500", async () => {
+  it("id mal formado -> 400", async () => {
     const organizer = await createUser();
     const res = await api().put("/api/events/editRoles/abc").set(auth(organizer.token)).send({});
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
   });
 });
 
@@ -1007,11 +1091,27 @@ describe("DELETE /api/events/deleteEvent/:id", () => {
     expect(await countReminders()).toBe(1);
   });
 
-  it("[comportamiento actual] no borra las opciones de votación del evento", async () => {
+  it("borra también las opciones de votación del evento (y no las de otros)", async () => {
     const organizer = await createUser();
     const event = await createEvent({ organizer: organizer._id });
+    const other = await createEvent({ organizer: organizer._id });
     await createOption({ event: event._id, title: "Vacío" });
+    const kept = await createOption({ event: other._id, title: "Chori" });
     await api().delete(`/api/events/deleteEvent/${event._id}`).set(auth(organizer.token)).expect(200);
+    expect(await countOptions()).toBe(1);
+    expect(await findOption(kept._id)).not.toBeNull();
+  });
+
+  it("si una parte del borrado falla, no borra nada (transacción)", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    await createRating({ event: event._id, user: organizer._id, score: 5 });
+    await createOption({ event: event._id, title: "Vacío" });
+    simulateDeleteFailure("Option", "falla a mitad del borrado");
+    const res = await api().delete(`/api/events/deleteEvent/${event._id}`).set(auth(organizer.token));
+    expect(res.status).toBe(500);
+    expect(await findEvent(event._id)).not.toBeNull();
+    expect(await countRatings()).toBe(1);
     expect(await countOptions()).toBe(1);
   });
 

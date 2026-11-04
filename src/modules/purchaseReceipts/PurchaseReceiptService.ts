@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../../core/errors/AppError.js";
+import { isValidId } from "../../core/validation/isValidId.js";
 import { IEvent, IEventWithPurchaseReceiptsPopulated, IPurchaseReceipt } from "../../models/interfaces.js";
 import { EventRepository } from "../events/EventRepository.js";
 import { ImageService } from "../images/ImageService.js";
@@ -33,8 +34,9 @@ export class PurchaseReceiptService {
     return event.purchaseReceipts;
   }
 
-  getById(id: string): Promise<IPurchaseReceipt> {
-    return this.getReceipt(id);
+  // El recibo tiene que ser del evento de la ruta (el middleware valida la membresía en ese evento).
+  getById(id: string, eventId: string): Promise<IPurchaseReceipt> {
+    return this.getReceiptOfEvent(id, eventId);
   }
 
   // Solo un designado de compras del evento del recibo puede adjuntar el archivo.
@@ -79,18 +81,41 @@ export class PurchaseReceiptService {
     return receipt;
   }
 
-  // Se procesa en orden: si un recibo no existe, los anteriores ya quedaron guardados.
-  async assignParticipants(receipts: ReceiptParticipantsInput[]): Promise<void> {
-    for (const input of receipts) {
+  // Solo un designado de compras del evento de cada recibo, y los participantes
+  // tienen que ser miembros de ese evento. Se valida todo antes de guardar nada.
+  async assignParticipants(requesterId: string, receipts: unknown): Promise<void> {
+    if (!Array.isArray(receipts)) throw new BadRequestError("receipts must be an array.");
+    const updates: { receipt: IPurchaseReceipt; participants: mongoose.Types.ObjectId[] }[] = [];
+    for (const input of receipts as ReceiptParticipantsInput[]) {
+      if (!isValidId(String(input?.id))) throw new BadRequestError("Invalid ObjectID");
       const receipt: IPurchaseReceipt | null = await this.receipts.findById(input.id);
       if (!receipt) throw new NotFoundError("One or more purchase receipts were not found");
-      receipt.participants = input.participants;
+      const event: IEvent | null = await this.events.findById(String(receipt.event));
+      if (!event) throw new NotFoundError("One or more purchase receipts were not found");
+      if (!event.shoppingDesignee.some((id) => id.toString() === requesterId))
+        throw new ForbiddenError("Access denied. User is not a shopping designee.");
+      const participants: unknown = input.participants;
+      const allMembers: boolean =
+        Array.isArray(participants) &&
+        participants.every((participant) =>
+          event.members.some((member) => member.equals(String(participant)))
+        );
+      if (!allMembers) throw new BadRequestError("All participants must be members of the event.");
+      updates.push({
+        receipt,
+        participants: [...new Set((participants as unknown[]).map(String))].map(
+          (id) => new mongoose.Types.ObjectId(id)
+        ),
+      });
+    }
+    for (const { receipt, participants } of updates) {
+      receipt.participants = participants;
       await this.receipts.save(receipt);
     }
   }
 
-  async delete(id: string): Promise<IPurchaseReceipt> {
-    const receipt: IPurchaseReceipt = await this.getReceipt(id);
+  async delete(id: string, eventId: string): Promise<IPurchaseReceipt> {
+    const receipt: IPurchaseReceipt = await this.getReceiptOfEvent(id, eventId);
     const event: IEvent | null = await this.events.findById(String(receipt.event));
     if (event.state !== "closed")
       throw new BadRequestError(
@@ -102,6 +127,13 @@ export class PurchaseReceiptService {
       await this.events.save(event);
     }
     await this.receipts.deleteById(id);
+    return receipt;
+  }
+
+  private async getReceiptOfEvent(id: string, eventId: string): Promise<IPurchaseReceipt> {
+    if (!isValidId(id)) throw new BadRequestError("Invalid ObjectID");
+    const receipt: IPurchaseReceipt = await this.getReceipt(id);
+    if (String(receipt.event) !== eventId) throw new NotFoundError(receiptNotFoundMessage);
     return receipt;
   }
 

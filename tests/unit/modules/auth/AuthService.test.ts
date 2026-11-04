@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import bcrypt from "bcrypt";
-import { AuthService, InvalidVerificationCodeError } from "../../../../src/modules/auth/AuthService.js";
+import { AuthService } from "../../../../src/modules/auth/AuthService.js";
 import { BadRequestError, NotFoundError } from "../../../../src/core/errors/AppError.js";
 
 const NOW = 1_700_000_000_000;
@@ -84,10 +84,10 @@ describe("AuthService.verifyCode", () => {
     await expect(service.verifyCode("ana@test.com", "123456")).resolves.toBeUndefined();
   });
 
-  it("código incorrecto suma un intento y lanza InvalidVerificationCodeError", async () => {
+  it("código incorrecto suma un intento y lanza BadRequestError", async () => {
     const user = await userWithCode();
     const { service } = setup(user);
-    await expect(service.verifyCode("ana@test.com", "000000")).rejects.toBeInstanceOf(InvalidVerificationCodeError);
+    await expect(service.verifyCode("ana@test.com", "000000")).rejects.toEqual(new BadRequestError("Invalid verification code."));
     expect(user.verificationAttempts).toBe(1);
   });
 

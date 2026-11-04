@@ -8,7 +8,9 @@ if (!mongoUri || !mongoUri.startsWith("mongodb://127.0.0.1")) {
   throw new Error(`Refusing to run integration tests against ${mongoUri}`);
 }
 // Base de datos única por archivo de test: permite correr archivos en paralelo.
-process.env.DATABASE_URL = `${mongoUri}be-asado-test-${randomUUID()}`;
+// La URI del replica set trae opciones (?replicaSet=...): el nombre de la base va antes.
+const [mongoBase, mongoOptions] = mongoUri.split("?");
+process.env.DATABASE_URL = `${mongoBase}be-asado-test-${randomUUID()}${mongoOptions ? `?${mongoOptions}` : ""}`;
 
 beforeAll(async () => {
   // src/app.ts conecta a la base al importarse y loguea "Connected to MongoDB".

@@ -11,7 +11,7 @@ export class PurchaseReceiptController {
   };
 
   getById = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.getById(req.params.id));
+    return res.status(STATUS_CODES.OK).json(await this.service.getById(req.params.id, req.params.event));
   };
 
   uploadFile = async (req: IRequestWithUser, res: Response): Promise<Response> => {
@@ -28,14 +28,14 @@ export class PurchaseReceiptController {
     return res.status(STATUS_CODES.CREATED).json(receipt);
   };
 
-  assignMembers = async (req: Request, res: Response): Promise<Response> => {
-    await this.service.assignParticipants(req.body.receipts);
+  assignMembers = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    await this.service.assignParticipants(req.user._id, req.body.receipts);
     return res
       .status(STATUS_CODES.OK)
       .json({ message: "Participants assigned to receipts successfully" });
   };
 
   delete = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.delete(req.params.id));
+    return res.status(STATUS_CODES.OK).json(await this.service.delete(req.params.id, req.params.event));
   };
 }

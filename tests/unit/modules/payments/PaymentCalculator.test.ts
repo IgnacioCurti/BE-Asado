@@ -131,11 +131,11 @@ describe("assignEventValues", () => {
     });
   });
 
-  it("un comprobante sin participantes deja el saldo del comprador en NaN (división por cero)", () => {
+  it("un comprobante sin participantes no lo paga nadie: el comprador queda en 0 (no NaN)", () => {
     const result = assignEventValues([receipt(100, ana, [])]);
     expect(result).toHaveLength(1);
     expect(result[0].userId).toBe(ana._id);
-    expect(result[0].totalCost).toBeNaN();
+    expect(result[0].totalCost).toBe(0);
   });
 
   it("tolera montos 0", () => {
