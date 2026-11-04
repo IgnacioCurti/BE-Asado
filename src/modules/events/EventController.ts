@@ -40,4 +40,38 @@ export class EventController {
     );
     return res.status(STATUS_CODES.OK).json({ userAmount });
   };
+
+  subscribe = async (req: Request, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.service.subscribe(req.params.event, req.params.id));
+  };
+
+  unsubscribe = async (req: Request, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.service.unsubscribe(req.params.event, req.params.id));
+  };
+
+  editRoles = async (req: Request, res: Response): Promise<Response> => {
+    const event = await this.service.editRoles(req.params.id, {
+      chef: req.body.chef,
+      shoppingDesignee: req.body.shoppingDesignee,
+    });
+    return res.status(STATUS_CODES.OK).json(event);
+  };
+
+  edit = async (req: Request, res: Response): Promise<Response> => {
+    const event = await this.service.edit(req.params.id, {
+      title: req.body.title,
+      datetime: req.body.datetime,
+      description: req.body.description,
+      memberLimit: req.body.memberLimit,
+      penalization: req.body.penalization,
+      penalizationStartDate: req.body.penalizationStartDate,
+      state: req.body.state,
+      isPrivate: req.body.isPrivate,
+    });
+    return res.status(STATUS_CODES.OK).json(event);
+  };
 }

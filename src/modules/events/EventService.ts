@@ -5,18 +5,52 @@ import {
   IEventAmountCalculations,
   IEventPopulatedWithOptions,
   IEventWithPurchaseReceipts,
+  IEventWithPurchaseReceiptsOptions,
   IMemberWhoHasUploaded,
   IPublicEvent,
   ITransferInfo,
 } from "../../models/interfaces.js";
+import { ReminderScheduler } from "../notifications/ReminderScheduler.js";
+import { OptionRepository } from "../options/OptionRepository.js";
 import { PaymentCalculator } from "../payments/PaymentCalculator.js";
+import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRepository.js";
+import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
+import { UserRepository } from "../users/UserRepository.js";
 import { EventMapper } from "./EventMapper.js";
 import { EventRepository } from "./EventRepository.js";
 
 export const eventNotFoundMessage: string = "The event with the given ID was not found.";
 
 const STATES_WITH_COSTS: string[] = ["finished", "readyforpayment"];
+const STATES_WITHOUT_UNSUBSCRIBE: string[] = ["closed", "readyforpayment"];
+const userNotFoundMessage: string = "The user with the given ID was not found.";
+
+// Estados a los que se puede pasar con editEvent. "finished" lo pone el sistema
+// cuando se aprueban todos los pagos; cancelled y finished son finales.
+const ALLOWED_STATE_TRANSITIONS: Record<string, string[]> = {
+  available: ["closed", "cancelled"],
+  closed: ["available", "readyforpayment", "cancelled"],
+  readyforpayment: ["closed"],
+  cancelled: [],
+  finished: [],
+};
+
+export interface EventEditInput {
+  title?: string;
+  datetime?: Date;
+  description?: string;
+  memberLimit?: number;
+  penalization?: number;
+  penalizationStartDate?: Date | null;
+  state?: string;
+  isPrivate?: boolean;
+}
+
+export interface EventRolesInput {
+  chef?: mongoose.Types.ObjectId | null;
+  shoppingDesignee: mongoose.Types.ObjectId[];
+}
 
 export interface EventServiceDeps {
   events: Pick<
@@ -27,8 +61,17 @@ export interface EventServiceDeps {
     | "findByIdWithDetails"
     | "findByIdForAmounts"
     | "findByIdWithPurchaseReceiptIds"
+    | "findById"
+    | "save"
+    | "addMemberIfAllowed"
+    | "findByIdWithReceiptsAndOptions"
   >;
-  transferReceipts: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
+  paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
+  users: Pick<UserRepository, "findById">;
+  purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save">;
+  options: Pick<OptionRepository, "save">;
+  transferReceipts: Pick<TransferReceiptRepository, "existsApprovedForEvent">;
+  reminders: Pick<ReminderScheduler, "syncWithEvent" | "cancelForEvent">;
   payments: Pick<PaymentCalculator, "transfersFor" | "memberCost">;
   mapper: EventMapper;
 }
@@ -55,7 +98,7 @@ export class EventService {
   }
 
   getMembersPaymentStatus(eventId: string): Promise<IMemberWhoHasUploaded[]> {
-    return this.deps.transferReceipts.membersWhoHaveUploaded(eventId);
+    return this.deps.paymentStatus.membersWhoHaveUploaded(eventId);
   }
 
   // Todas las transferencias para saldar el evento (incluye las de monto 0).
@@ -86,5 +129,116 @@ export class EventService {
     if (!STATES_WITH_COSTS.includes(event.state))
       throw new ForbiddenError("Event state needs to be either finished or ready for payment");
     return this.deps.payments.memberCost(event.purchaseReceipts, member);
+  }
+
+  // El usuario se suma al evento y a los recibos de compra ya cargados.
+  async subscribe(eventId: string, userId: string): Promise<IEventWithPurchaseReceipts | null> {
+    const event: IEvent = await this.getEvent(eventId);
+    const user = new mongoose.Types.ObjectId(userId);
+    const precheck: string | null = this.cannotJoinMessage(event, user);
+    if (precheck) throw new BadRequestError(precheck);
+    if (!(await this.deps.users.findById(userId))) throw new BadRequestError(userNotFoundMessage);
+
+    // Las condiciones se vuelven a verificar de forma atómica al escribir.
+    const joined: IEvent | null = await this.deps.events.addMemberIfAllowed(event._id, user);
+    if (!joined) {
+      const current: IEvent | null = await this.deps.events.findById(String(event._id));
+      throw new BadRequestError(
+        (current && this.cannotJoinMessage(current, user)) || "The event is full."
+      );
+    }
+    await this.deps.purchaseReceipts.addParticipant(event.purchaseReceipts, user);
+    return this.deps.events.findByIdWithPurchaseReceiptIds(String(event._id));
+  }
+
+  // El usuario sale del evento, de sus recibos de compra y de sus votos.
+  async unsubscribe(eventId: string, userId: string): Promise<IEventWithPurchaseReceiptsOptions> {
+    const event: IEventWithPurchaseReceiptsOptions | null =
+      await this.deps.events.findByIdWithReceiptsAndOptions(eventId);
+    if (!event) throw new NotFoundError(eventNotFoundMessage);
+    const member = new mongoose.Types.ObjectId(userId);
+    const index: number = event.members.findIndex((id) => member.equals(id));
+    if (index === -1)
+      throw new NotFoundError("The member with the given ID is not part of the event.");
+    if (!(await this.deps.users.findById(userId))) throw new BadRequestError(userNotFoundMessage);
+    if (STATES_WITHOUT_UNSUBSCRIBE.includes(event.state))
+      throw new BadRequestError(
+        "The user can't unsubscribe from the event if it's closed or ready for payment."
+      );
+
+    for (const receipt of event.purchaseReceipts) {
+      receipt.participants = receipt.participants.filter((id) => !id.equals(member));
+      await this.deps.purchaseReceipts.save(receipt);
+    }
+    for (const option of event.options) {
+      option.participants = option.participants.filter((id) => !id.equals(member));
+      await this.deps.options.save(option);
+    }
+    event.members.splice(index, 1);
+    await this.deps.events.save(event);
+    return event;
+  }
+
+  async editRoles(eventId: string, roles: EventRolesInput): Promise<IEvent> {
+    const event: IEvent = await this.getEvent(eventId);
+    event.chef = roles.chef ? roles.chef : null;
+    event.shoppingDesignee = roles.shoppingDesignee;
+    await this.deps.events.save(event);
+    return event;
+  }
+
+  // Reemplaza los datos editables del evento validando la transición de estado.
+  async edit(eventId: string, input: EventEditInput): Promise<IEvent> {
+    const event: IEvent = await this.getEvent(eventId);
+    const transitionError: string | null = await this.stateTransitionError(
+      event,
+      String(input.state ?? "").toLowerCase()
+    );
+    if (transitionError) throw new BadRequestError(transitionError);
+
+    event.title = input.title;
+    event.datetime = input.datetime;
+    event.description = input.description;
+    event.memberLimit = input.memberLimit;
+    event.penalization = input.penalization;
+    event.penalizationStartDate = input.penalization > 0 ? input.penalizationStartDate : null;
+    event.state = input.state;
+    event.isPrivate = input.isPrivate;
+    if (event.shoppingDesignee.length == 0 && event.state !== "available")
+      throw new BadRequestError("The event has no shopping designees.");
+    await this.deps.events.save(event);
+
+    if (event.state === "cancelled") await this.deps.reminders.cancelForEvent(event._id);
+    else await this.deps.reminders.syncWithEvent(event);
+    return event;
+  }
+
+  private async getEvent(id: string): Promise<IEvent> {
+    const event: IEvent | null = await this.deps.events.findById(id);
+    if (!event) throw new NotFoundError(eventNotFoundMessage);
+    return event;
+  }
+
+  private cannotJoinMessage(event: IEvent, userId: mongoose.Types.ObjectId): string | null {
+    if (event.memberLimit <= event.members.length) return "The event is full.";
+    if (event.state !== "available") return "The event is not available for users to join";
+    if (event.members.some((member) => member.equals(userId)))
+      return "The user has already joined the event";
+    return null;
+  }
+
+  private async stateTransitionError(event: IEvent, nextState: string): Promise<string | null> {
+    const currentState: string = event.state;
+    if (nextState === currentState) return null;
+    if (!ALLOWED_STATE_TRANSITIONS[currentState]?.includes(nextState))
+      return `Cannot change the event state from "${currentState}" to "${nextState}".`;
+    if (nextState === "readyforpayment" && event.purchaseReceipts.length === 0)
+      return "The event needs at least one purchase receipt to be ready for payment.";
+    if (
+      currentState === "readyforpayment" &&
+      (await this.deps.transferReceipts.existsApprovedForEvent(event._id))
+    )
+      return "The event can't go back to closed because some payments were already approved.";
+    return null;
   }
 }

@@ -6,6 +6,7 @@ import {
   IEventAmountCalculations,
   IEventPopulatedWithOptions,
   IEventWithPurchaseReceipts,
+  IEventWithPurchaseReceiptsOptions,
   IPublicEventPreReduction,
   IEventAmountCalculationsWithTransfers,
   IEventWithMembersPurchaseReceiptsPopulated,
@@ -213,5 +214,32 @@ export class EventRepository extends BaseRepository<IEvent> {
       .findById(id)
       .populate("purchaseReceipts")
       .exec() as unknown as Promise<IEventWithPurchaseReceipts | null>;
+  }
+
+  // Agrega al miembro solo si, en el momento de escribir, el evento sigue
+  // disponible, no lo tiene y no está lleno (evita carreras entre inscripciones).
+  addMemberIfAllowed(
+    eventId: mongoose.Types.ObjectId,
+    userId: mongoose.Types.ObjectId
+  ): Promise<IEvent | null> {
+    return this.model
+      .findOneAndUpdate(
+        {
+          _id: eventId,
+          state: "available",
+          members: { $ne: userId },
+          $expr: { $lt: [{ $size: "$members" }, "$memberLimit"] },
+        },
+        { $push: { members: userId } }
+      )
+      .exec();
+  }
+
+  findByIdWithReceiptsAndOptions(id: string): Promise<IEventWithPurchaseReceiptsOptions | null> {
+    return this.model
+      .findById(id)
+      .populate("purchaseReceipts")
+      .populate("options")
+      .exec() as unknown as Promise<IEventWithPurchaseReceiptsOptions | null>;
   }
 }
