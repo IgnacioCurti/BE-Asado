@@ -1,7 +1,13 @@
 import { BaseRepository } from "../../core/repositories/BaseRepository.js";
 import { Event } from "../../models/event.js";
 import mongoose from "mongoose";
-import { IEvent, IRating, IUserName } from "../../models/interfaces.js";
+import {
+  IEvent,
+  IEventAmountCalculationsWithTransfers,
+  IEventWithMembersPurchaseReceiptsPopulated,
+  IRating,
+  IUserName,
+} from "../../models/interfaces.js";
 
 export interface IEventWithRatings extends Omit<IEvent, "ratings"> {
   ratings: IRating[];
@@ -38,5 +44,43 @@ export class EventRepository extends BaseRepository<IEvent> {
     await this.model
       .updateOne({ options: optionId }, { $pull: { options: optionId } })
       .exec();
+  }
+
+  // Eventos listos para pagar donde el usuario es miembro, con lo necesario
+  // para calcular deudas (recibos con usuarios y miembros populados).
+  findReadyForPaymentByMember(
+    userId: string
+  ): Promise<IEventWithMembersPurchaseReceiptsPopulated[]> {
+    return this.model
+      .find({ members: userId, state: "readyforpayment" })
+      .populate({
+        path: "purchaseReceipts",
+        populate: [
+          { path: "shoppingDesignee", model: "User" },
+          { path: "participants", model: "User" },
+        ],
+      })
+      .populate({ path: "members", model: "User" })
+      .exec() as unknown as Promise<IEventWithMembersPurchaseReceiptsPopulated[]>;
+  }
+
+  findReadyForPaymentByDesignee(
+    designeeId: mongoose.Types.ObjectId
+  ): Promise<IEventAmountCalculationsWithTransfers[]> {
+    return this.model
+      .find({ shoppingDesignee: designeeId, state: "readyforpayment" })
+      .select("purchaseReceipts members")
+      .populate([
+        {
+          path: "purchaseReceipts",
+          populate: [
+            { path: "shoppingDesignee", model: "User" },
+            { path: "participants", model: "User" },
+          ],
+        },
+        { path: "members", model: "User" },
+        { path: "transferReceipts", model: "TransferReceipt" },
+      ])
+      .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers[]>;
   }
 }

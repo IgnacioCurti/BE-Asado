@@ -1,40 +1,40 @@
 import express from "express";
 import {
-  getUsers,
-  getUserById,
-  isDebtor,
-  hasPendingTransfers,
-  register,
-  editUser,
-  editProfilePicture,
-  deleteUser,
-} from "../controllers/users.js";
-import {
   auth,
   multerUploadImages,
   sameUser,
 } from "../middleware/middleware.js";
+import { asyncHandler } from "../core/http/asyncHandler.js";
+import { userController } from "../modules/users/index.js";
 
 const usersRouter: express.Router = express.Router();
 
-usersRouter.get("/getUsers", auth, getUsers);
+// Mensaje por defecto con punto final, como respondía el controlador original.
+const handle = (handler: Parameters<typeof asyncHandler>[0]) =>
+  asyncHandler(handler, "Internal server error.");
 
-usersRouter.get("/getUserById/:id", auth, getUserById);
+usersRouter.get("/getUsers", auth, handle(userController.list));
 
-usersRouter.get("/isDebtor/:id", [auth, sameUser], isDebtor);
+usersRouter.get("/getUserById/:id", auth, handle(userController.getById));
 
-usersRouter.get("/hasPendingTransfers/:id", [auth, sameUser], hasPendingTransfers);
+usersRouter.get("/isDebtor/:id", [auth, sameUser], handle(userController.isDebtor));
 
-usersRouter.post("/register", register);
+usersRouter.get(
+  "/hasPendingTransfers/:id",
+  [auth, sameUser],
+  handle(userController.hasPendingTransfers)
+);
 
-usersRouter.put("/editUser/:id", [auth, sameUser], editUser);
+usersRouter.post("/register", handle(userController.register));
+
+usersRouter.put("/editUser/:id", [auth, sameUser], handle(userController.edit));
 
 usersRouter.put(
   "/editProfilePicture/:id",
   [auth, sameUser, multerUploadImages.single("file")],
-  editProfilePicture
+  handle(userController.editProfilePicture)
 );
 
-usersRouter.delete("/deleteUser/:id", [auth, sameUser], deleteUser);
+usersRouter.delete("/deleteUser/:id", [auth, sameUser], handle(userController.delete));
 
 export default usersRouter;
