@@ -5,6 +5,7 @@ import {
   IEvent,
   IEventAmountCalculationsWithTransfers,
   IEventWithMembersPurchaseReceiptsPopulated,
+  IEventWithPurchaseReceiptsPopulated,
   IRating,
   IUserName,
 } from "../../models/interfaces.js";
@@ -82,5 +83,20 @@ export class EventRepository extends BaseRepository<IEvent> {
         { path: "transferReceipts", model: "TransferReceipt" },
       ])
       .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers[]>;
+  }
+
+  findByIdWithPurchaseReceipts(id: string): Promise<IEventWithPurchaseReceiptsPopulated | null> {
+    return this.model
+      .findById(id)
+      .populate([
+        {
+          path: "purchaseReceipts",
+          populate: [
+            { path: "shoppingDesignee", model: "User" },
+            { path: "participants", model: "User" },
+          ],
+        },
+      ])
+      .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulated | null>;
   }
 }
