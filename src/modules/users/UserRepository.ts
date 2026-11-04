@@ -10,4 +10,8 @@ export class UserRepository extends BaseRepository<IUser> {
   async hasProfilePicture(imageId: string): Promise<boolean> {
     return Boolean(await this.model.exists({ profilePicture: imageId }));
   }
+
+  findByEmail(email: string): Promise<IUser | null> {
+    return this.model.findOne({ email }).exec();
+  }
 }

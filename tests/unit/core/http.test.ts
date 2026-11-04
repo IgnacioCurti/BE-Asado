@@ -52,3 +52,13 @@ describe("asyncHandler", () => {
     expect(res.json).toHaveBeenCalledWith({ ok: true });
   });
 });
+
+describe("fallbackMessage", () => {
+  it("se usa cuando el error no tiene mensaje", async () => {
+    const res = fakeRes();
+    await asyncHandler(async () => {
+      throw {};
+    }, "Internal server error.")({} as any, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith({ message: "Internal server error." });
+  });
+});
