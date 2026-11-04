@@ -10,6 +10,7 @@ import { Reminder } from "../models/reminder.js";
 import { membersWhoHaveUploaded } from "./transferReceipts.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { nowArgentina } from "../utils/dates.js";
+import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
 import {
   IEvent,
   IEventAmountCalculations,
@@ -614,97 +615,6 @@ function reduceEventsInformation(
   return reducedEvents;
 }
 
-export function calculateTransfersInfo(
-  amounts: IUserBalance[]
-): ITransferInfo[] {
-  const transferInfo: ITransferInfo[] = [];
-
-  while (amounts.length > 0) {
-    amounts.sort((a, b) => a.totalCost - b.totalCost);
-    let payer: IUserBalance = amounts[0];
-    if (payer.totalCost == 0) {
-      transferInfo.push({
-        userId: payer.userId,
-        userName: payer.userName,
-        amount: payer.totalCost,
-        receiver: null,
-      });
-      amounts.splice(0, 1);
-      continue;
-    }
-    let receiver: IUserBalance = amounts[amounts.length - 1];
-    transferInfo.push({
-      userId: payer.userId,
-      userName: payer.userName,
-      amount: payer.totalCost * -1,
-      receiver: {
-        receiverId: receiver.userId,
-        receiverName: receiver.userName,
-        receiverLastName: receiver.userLastName,
-        receiverCbu: receiver.userCbu,
-        receiverAlias: receiver.userAlias,
-      },
-    });
-    const updatedAmount: number = Number(
-      (amounts[amounts.length - 1].totalCost + payer.totalCost).toFixed(2)
-    );
-    amounts[amounts.length - 1].totalCost = updatedAmount;
-    amounts.splice(0, 1);
-  }
-  return transferInfo;
-}
-
-export function assignEventValues(
-  receipts: IPurchaseReceiptWithUsers[]
-): IUserBalance[] {
-  const userBalances: IUserBalance[] = [];
-  for (const receipt of receipts) {
-    const receiptCostPerUser: number = Number(
-      (receipt.amount / receipt.participants.length).toFixed(2)
-    );
-    for (const participant of receipt.participants) {
-      let participantEntry: IUserBalance | undefined = userBalances.find((a) =>
-        participant._id.equals(a.userId)
-      );
-      if (participantEntry) {
-        participantEntry.totalCost = Number(
-          (participantEntry.totalCost - receiptCostPerUser).toFixed(2)
-        );
-      } else {
-        userBalances.push({
-          userId: participant._id,
-          userName: participant.name,
-          userLastName: participant.lastName,
-          userCbu: participant.cbu,
-          userAlias: participant.alias,
-          totalCost: -receiptCostPerUser,
-        });
-      }
-    }
-    const cleanReceiptAmount: number = Number(
-      (receiptCostPerUser * receipt.participants.length).toFixed(2)
-    );
-    const designeeEntry: IUserBalance | undefined = userBalances.find((a) =>
-      receipt.shoppingDesignee._id.equals(a.userId)
-    );
-    if (designeeEntry) {
-      designeeEntry.totalCost = Number(
-        (designeeEntry.totalCost + cleanReceiptAmount).toFixed(2)
-      );
-    } else {
-      userBalances.push({
-        userId: receipt.shoppingDesignee._id,
-        userName: receipt.shoppingDesignee.name,
-        userLastName: receipt.shoppingDesignee.lastName,
-        userCbu: receipt.shoppingDesignee.cbu,
-        userAlias: receipt.shoppingDesignee.alias,
-        totalCost: cleanReceiptAmount,
-      });
-    }
-  }
-  return userBalances;
-}
-
 export async function getMembersAmount(
   req: Request,
   res: Response
@@ -745,10 +655,9 @@ export async function getMembersAmount(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The event has no purchase receipts." });
-    const userBalances: IUserBalance[] = assignEventValues(
+    const transferInfo: ITransferInfo[] = paymentCalculator.transfersFor(
       event.purchaseReceipts
     );
-    const transferInfo: ITransferInfo[] = calculateTransfersInfo(userBalances);
     return res.status(STATUS_CODES.OK).json(transferInfo);
   } catch (e) {
     return res
@@ -796,24 +705,9 @@ export async function getMemberIndividualCost(
           message:
             "Event state needs to be either finished or ready for payment",
         });
-    const userReceipts: IPurchaseReceipt[] = event.purchaseReceipts.filter(
-      (receipt) =>
-        receipt.participants.some((p) =>
-          p._id.equals(new mongoose.Types.ObjectId(req.params.user))
-        )
-    );
-
-    // Same per-receipt rounding as assignEventValues, so this matches the
-    // amounts shown by getMembersAmount.
-    const userAmount: number = userReceipts.reduce(
-      (total: number, receipt: IPurchaseReceipt) =>
-        Number(
-          (
-            total +
-            Number((receipt.amount / receipt.participants.length).toFixed(2))
-          ).toFixed(2)
-        ),
-      0
+    const userAmount: number = paymentCalculator.memberCost(
+      event.purchaseReceipts,
+      new mongoose.Types.ObjectId(req.params.user)
     );
 
     return res.status(STATUS_CODES.OK).json({ userAmount: userAmount });
