@@ -8,6 +8,7 @@ import {
   IUserBalance,
 } from "../models/interfaces.js";
 import { Event } from "../models/event.js";
+import { isValidId } from "../core/validation/isValidId.js";
 import {
   assignEventValues,
   calculateTransfersInfo,
@@ -56,15 +57,6 @@ function sendEmail(
     req.write(payload, "utf8");
     req.end();
   });
-}
-
-function isValidId(id: string): boolean {
-  if (mongoose.Types.ObjectId.isValid(id)) {
-    if (String(new mongoose.Types.ObjectId(id)) == id) {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function getEventsDebtors(eventId: string): Promise<IUser[]> {

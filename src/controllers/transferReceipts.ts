@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { TransferReceipt } from "../models/transferReceipt.js";
 import { Event } from "../models/event.js";
 import { Image } from "../models/image.js";
-import { saveImage } from "./images.js";
+import { imageService } from "../modules/images/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { nowArgentina } from "../utils/dates.js";
 import {
@@ -92,7 +92,7 @@ export async function uploadFileTransferReceipt(
       return res
         .status(STATUS_CODES.BAD_REQUEST)
         .json({ message: "The transfer receipt is already approved." });
-    const imageId = await saveImage(req.file);
+    const imageId = await imageService.save(req.file);
     const previousImage: mongoose.Types.ObjectId | null | undefined =
       transferReceipt.image;
     transferReceipt.image = imageId;
