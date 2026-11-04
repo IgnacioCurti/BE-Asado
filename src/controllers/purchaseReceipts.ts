@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import { Request, Response } from "express";
 import { PurchaseReceipt } from "../models/purchaseReceipt.js";
 import { Event } from "../models/event.js";
-import { saveImage } from "./images.js";
+import { imageService } from "../modules/images/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import {
   IRequestWithUser,
@@ -94,7 +94,7 @@ export async function uploadFilePurchaseReceipt(
       return res
         .status(STATUS_CODES.FORBIDDEN)
         .json({ message: "Access denied. User is not a shopping designee." });
-    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+    const imageId: mongoose.Types.ObjectId = await imageService.save(req.file);
     purchaseReceipt.image = imageId;
     await purchaseReceipt.save();
     return res.status(STATUS_CODES.OK).json({ imageId: imageId });

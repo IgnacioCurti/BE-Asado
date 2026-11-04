@@ -5,7 +5,7 @@ import { Image } from "../models/image.js";
 import { Event } from "../models/event.js";
 import { TransferReceipt } from "../models/transferReceipt.js";
 import { assignEventValues, calculateTransfersInfo } from "./events.js";
-import { saveImage } from "./images.js";
+import { imageService } from "../modules/images/index.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import {
   IEventAmountCalculationsWithTransfers,
@@ -247,7 +247,7 @@ export async function editProfilePicture(
         user.profilePicture
       );
     }
-    const imageId: mongoose.Types.ObjectId = await saveImage(req.file);
+    const imageId: mongoose.Types.ObjectId = await imageService.save(req.file);
     user.profilePicture = imageId;
     user = await user.save();
     return res.status(STATUS_CODES.OK).json({ imageId: imageId });
