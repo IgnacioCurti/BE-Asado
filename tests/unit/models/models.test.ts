@@ -15,6 +15,7 @@ import { TransferReceipt } from "../../../src/models/transferReceipt.js";
 import { PurchaseReceipt } from "../../../src/models/purchaseReceipt.js";
 import { Option } from "../../../src/models/option.js";
 import { Image } from "../../../src/models/image.js";
+import { Group, GROUP_LIMITS } from "../../../src/models/group.js";
 
 const oid = () => new mongoose.Types.ObjectId();
 
@@ -289,5 +290,68 @@ describe("Option schema", () => {
 describe("Image schema", () => {
   it("no tiene campos obligatorios", () => {
     expect(errorsOf(new Image({}))).toEqual([]);
+  });
+});
+
+describe("Group schema", () => {
+  const valid = () => {
+    const owner = oid();
+    return { name: "Los del asado", code: "K7PX2MQA", admins: [owner], members: [owner] };
+  };
+
+  it("un grupo mínimo es válido y arranca sin portadas", () => {
+    const group = new Group(valid());
+    expect(errorsOf(group)).toEqual([]);
+    expect([...group.coverPhotos]).toEqual([]);
+  });
+
+  it("name y code son obligatorios; sin admins es inválido", () => {
+    expect(errorsOf(new Group({}))).toEqual(["admins", "code", "name"]);
+  });
+
+  it("name: se recorta y tiene como máximo 50 caracteres", () => {
+    const group = new Group({ ...valid(), name: "  Asado  " });
+    expect(group.name).toBe("Asado");
+    expect(errorsOf(new Group({ ...valid(), name: "a".repeat(GROUP_LIMITS.NAME_MAX_LENGTH) }))).toEqual([]);
+    expect(errorsOf(new Group({ ...valid(), name: "a".repeat(GROUP_LIMITS.NAME_MAX_LENGTH + 1) }))).toEqual(["name"]);
+  });
+
+  it("code: se guarda en mayúsculas y tiene que ser del alfabeto", () => {
+    expect(new Group({ ...valid(), code: " k7px2mqa " }).code).toBe("K7PX2MQA");
+    expect(errorsOf(new Group({ ...valid(), code: "K7PX2MQ0" }))).toEqual(["code"]);
+    expect(errorsOf(new Group({ ...valid(), code: "SHORT" }))).toEqual(["code"]);
+  });
+
+  it("code tiene índice único y members un índice para 'mis grupos'", () => {
+    const indexes = Group.schema.indexes().map(([fields, options]) => [Object.keys(fields)[0], Boolean(options?.unique)]);
+    expect(indexes).toEqual(expect.arrayContaining([["code", true], ["members", false]]));
+  });
+
+  it("todo admin tiene que ser miembro", () => {
+    const owner = oid();
+    expect(errorsOf(new Group({ ...valid(), admins: [owner], members: [oid()] }))).toEqual(["admins"]);
+  });
+
+  it("varios admins está permitido", () => {
+    const [a, b] = [oid(), oid()];
+    expect(errorsOf(new Group({ ...valid(), admins: [a, b], members: [a, b] }))).toEqual([]);
+  });
+
+  it("no se repiten admins ni miembros", () => {
+    const owner = oid();
+    expect(errorsOf(new Group({ ...valid(), admins: [owner, owner], members: [owner] }))).toEqual(["admins"]);
+    expect(errorsOf(new Group({ ...valid(), admins: [owner], members: [owner, owner] }))).toEqual(["members"]);
+  });
+
+  it(`como máximo ${GROUP_LIMITS.MAX_MEMBERS} miembros`, () => {
+    const members = Array.from({ length: GROUP_LIMITS.MAX_MEMBERS }, oid);
+    expect(errorsOf(new Group({ ...valid(), admins: [members[0]], members }))).toEqual([]);
+    expect(errorsOf(new Group({ ...valid(), admins: [members[0]], members: [...members, oid()] }))).toEqual(["members"]);
+  });
+
+  it(`como máximo ${GROUP_LIMITS.MAX_COVER_PHOTOS} fotos de portada`, () => {
+    const photos = Array.from({ length: GROUP_LIMITS.MAX_COVER_PHOTOS }, oid);
+    expect(errorsOf(new Group({ ...valid(), coverPhotos: photos }))).toEqual([]);
+    expect(errorsOf(new Group({ ...valid(), coverPhotos: [...photos, oid()] }))).toEqual(["coverPhotos"]);
   });
 });

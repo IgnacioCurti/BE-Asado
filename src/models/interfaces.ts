@@ -132,6 +132,16 @@ export interface IImage extends Document {
   image: Buffer;
 }
 
+export interface IGroup extends Document {
+  _id: mongoose.Types.ObjectId;
+  name: string;
+  code: string;
+  admins: mongoose.Types.ObjectId[];
+  members: mongoose.Types.ObjectId[];
+  coverPhotos: mongoose.Types.ObjectId[];
+  createdAt: Date;
+}
+
 export interface IEvent extends Document {
   _id: mongoose.Types.ObjectId;
   description?: string;
