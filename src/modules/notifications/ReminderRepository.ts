@@ -15,4 +15,8 @@ export class ReminderRepository extends BaseRepository<IReminder> {
   async deleteByEvent(eventId: mongoose.Types.ObjectId): Promise<void> {
     await this.model.deleteMany({ event: eventId }).exec();
   }
+
+  findDue(now: Date): Promise<IReminder[]> {
+    return this.model.find({ datetime: { $lte: now } }).exec();
+  }
 }

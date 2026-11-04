@@ -12,7 +12,7 @@ import {
   updateEvent,
 } from "../helpers/fixtures.js";
 import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
-import { getEventsDebtors } from "../../src/utils/utils.js";
+import { transferReceiptService } from "../../src/modules/transferReceipts/index.js";
 import { User } from "../../src/models/user.js";
 import mongoose from "mongoose";
 
@@ -207,7 +207,11 @@ describe("GET /api/cron/reminderCheck", () => {
   });
 });
 
-describe("getEventsDebtors (utils)", () => {
+// Antes getEventsDebtors en utils; hoy TransferReceiptService.getDebtors.
+const getEventsDebtors = (eventId: Parameters<typeof transferReceiptService.getDebtors>[0]) =>
+  transferReceiptService.getDebtors(eventId);
+
+describe("getEventsDebtors (TransferReceiptService.getDebtors)", () => {
   async function debtScenario() {
     const ana = await createUser();
     const beto = await createUser();

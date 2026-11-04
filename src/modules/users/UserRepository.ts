@@ -26,4 +26,8 @@ export class UserRepository extends BaseRepository<IUser> {
   findSafeById(id: string): Promise<ISafeUser | null> {
     return this.model.findById(id).select(UserRepository.SAFE_PROJECTION).exec();
   }
+
+  findWithNotificationEnabled(notification: keyof IUser["notifications"]): Promise<IUser[]> {
+    return this.model.find({ [`notifications.${notification}`]: true }).exec();
+  }
 }
