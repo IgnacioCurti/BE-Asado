@@ -1,14 +1,13 @@
 import jwt from "jsonwebtoken";
 import multer from "multer";
-import mongoose from "mongoose";
 import { NextFunction } from "express";
-import { Event } from "../models/event.js";
-import { TransferReceipt } from "../models/transferReceipt.js";
-import { isValidId } from "../utils/utils.js";
+import { isValidId } from "../core/validation/isValidId.js";
+import { sendError } from "../core/http/sendError.js";
+import { eventAccessPolicy as policy } from "../modules/events/index.js";
 import { jwtPrivateKey } from "../config.js";
 import { STATUS_CODES } from "../constants/httpStatusCode.js";
 import { Request, Response } from "express";
-import { IEvent, ITransferReceipt, IUserPayload, IRequestWithUser } from "../models/interfaces.js";
+import { IUserPayload, IRequestWithUser } from "../models/interfaces.js";
 
 const invalidObjectIdMessage: string = "Invalid ObjectID";
 
@@ -30,48 +29,6 @@ export function auth(req: IRequestWithUser, res: Response, next: NextFunction) {
     next();
   } catch (error: any) {
     return res.status(STATUS_CODES.BAD_REQUEST).json({ message: "Invalid token." });
-  }
-}
-
-export async function eventOrganizer(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.params.id))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent = await Event.findById(req.params.id);
-    if (!event)
-      return res
-        .status(STATUS_CODES.NOT_FOUND)
-        .json({ message: "The event with the given ID does not exist." });
-    if (event.organizer.toString() !== req.user._id)
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message: "Access denied. The user is not the event's organizer.",
-      });
-    next();
-  } catch (error: any) {
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
-}
-
-export async function eventParticipant(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.params.event))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent = await Event.findById(req.params.event);
-    if (!event)
-      return res
-        .status(STATUS_CODES.NOT_FOUND)
-        .json({ message: "The event with the given ID does not exist." });
-    if (!event.members.includes(new mongoose.Types.ObjectId(req.user._id)))
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message: "Access denied. The user is not a participant of the event.",
-      });
-    next();
-  } catch (error: any) {
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
   }
 }
 
@@ -116,133 +73,46 @@ export async function sameUser(req: IRequestWithUser, res: Response, next: NextF
   }
 }
 
-export async function shoppingDesignee(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.user._id) || !isValidId(req.params.event))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent = await Event.findById(req.params.event);
-    if (!event)
-      return res
-        .status(STATUS_CODES.NOT_FOUND)
-        .json({ message: "The event with the given ID does not exist." });
-    const designee: mongoose.Types.ObjectId | undefined = event.shoppingDesignee.find(
-      (s) => s.toString() == req.user._id
-    );
-    if (designee) {
-      next();
-    } else {
-      return res
-        .status(STATUS_CODES.FORBIDDEN)
-        .json({ message: "Access denied. User is not a shopping designee." });
+type AccessCheck = (req: IRequestWithUser) => Promise<void>;
+
+// Adapta una regla de EventAccessPolicy a middleware de Express: si la regla
+// lanza, responde el error (400 / 403 / 404 / 500); si no, sigue.
+function guard(check: AccessCheck) {
+  return async (req: IRequestWithUser, res: Response, next: NextFunction) => {
+    try {
+      await check(req);
+    } catch (error) {
+      return sendError(res, error);
     }
-  } catch (error: any) {
-    res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
-}
-
-export async function transferReceiptOwner(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.params.id))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: "Invalid ID" });
-    const transferReceipt: ITransferReceipt | null = await TransferReceipt.findById(req.params.id);
-    if (!transferReceipt)
-      return res.status(STATUS_CODES.NOT_FOUND).json({
-        message: "The transfer receipt with the given ID does not exist.",
-      });
-    if (transferReceipt.user.toString() !== req.user._id)
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message: "Access denied. The user is not the owner of the receipt.",
-      });
     next();
-  } catch (error: any) {
-    res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
+  };
 }
 
-function isOrganizerOrDesignee(event: IEvent, userId: string): boolean {
-  return (
-    event.organizer.toString() === userId ||
-    event.shoppingDesignee.some((id) => id.toString() === userId)
-  );
-}
+export const eventOrganizer = guard((req) =>
+  policy.assertOrganizer(req.params.id, req.user._id)
+);
 
-// For option routes: the event comes from :event (create) or from the
-// option in :id (edit/delete). Only its organizer or a designee may manage it.
-export async function optionManager(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    const eventId: string | undefined = req.params.event;
-    const targetId: string = eventId ?? req.params.id;
-    if (!isValidId(targetId))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent | null = eventId
-      ? await Event.findById(eventId)
-      : await Event.findOne({ options: targetId });
-    if (!event)
-      return res.status(STATUS_CODES.NOT_FOUND).json({
-        message: eventId
-          ? "The event with the given ID does not exist."
-          : "Option not found",
-      });
-    if (!isOrganizerOrDesignee(event, req.user._id))
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message:
-          "Access denied. The user is not the event's shopping designee or organizer.",
-      });
-    next();
-  } catch (error: any) {
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
-}
+export const eventParticipant = guard((req) =>
+  policy.assertMember(req.params.event, req.user._id)
+);
 
-// For voting: the user must be a member of the event the option in :id belongs to.
-export async function optionVoter(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.params.id))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent | null = await Event.findOne({ options: req.params.id });
-    if (!event)
-      return res.status(STATUS_CODES.NOT_FOUND).json({ message: "Option not found" });
-    if (!event.members.some((member) => member.toString() === req.user._id))
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message: "Access denied. The user is not a participant of the event.",
-      });
-    next();
-  } catch (error: any) {
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
-}
+export const shoppingDesignee = guard((req) =>
+  policy.assertShoppingDesignee(req.params.event, req.user._id)
+);
 
-export async function shoppingDesigneeOrEventOrganizer(req: IRequestWithUser, res: Response, next: NextFunction) {
-  try {
-    if (!isValidId(req.user._id) || !isValidId(req.params.id))
-      return res
-        .status(STATUS_CODES.BAD_REQUEST)
-        .json({ message: invalidObjectIdMessage });
-    const event: IEvent | null = await Event.findById(req.params.id);
-    if (!event)
-      return res
-        .status(STATUS_CODES.NOT_FOUND)
-        .json({ message: "The event with the given ID does not exist." });
-    const isDesignee: boolean = Boolean(
-      event.shoppingDesignee.find(
-        (id) => id.toString() === req.user._id.toString()
-      )
-    );
-    if (!isDesignee && event.organizer.toString() !== req.user._id)
-      return res.status(STATUS_CODES.FORBIDDEN).json({
-        message:
-          "Access denied. The user is not the event's shopping designee or organizer.",
-      });
-    next();
-  } catch (error: any) {
-    return res.status(STATUS_CODES.INTERNAL_SERVER_ERROR).json({ message: error?.message || "Internal server error" });
-  }
-}
+export const shoppingDesigneeOrEventOrganizer = guard((req) =>
+  policy.assertOrganizerOrDesignee(req.params.id, req.user._id)
+);
+
+export const transferReceiptOwner = guard((req) =>
+  policy.assertTransferReceiptOwner(req.params.id, req.user._id)
+);
+
+// Rutas de opciones: el evento sale de :event (crear) o de la opción en :id
+// (editar/borrar). Solo su organizador o un designado puede gestionarlas.
+export const optionManager = guard((req) =>
+  policy.assertOptionManager(req.params.event, req.params.id, req.user._id)
+);
+
+// Votar: el usuario tiene que ser miembro del evento al que pertenece la opción.
+export const optionVoter = guard((req) => policy.assertOptionVoter(req.params.id, req.user._id));
