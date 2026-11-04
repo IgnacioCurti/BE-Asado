@@ -73,6 +73,9 @@ const ID2 = "507f1f77bcf86cd799439012";
 const protectedRoutes: [string, string][] = [
   ["get", "/api/events/getEvents"],
   ["get", "/api/events/getPublicAndPrivateEvents"],
+  ["get", `/api/events/getEventById/${ID}`],
+  ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`],
+  ["get", `/api/events/getMembersAmount/${ID}`],
   ["get", `/api/events/getMemberIndividualCost/${ID}/${ID2}`],
   ["post", "/api/events/createEvent"],
   ["put", `/api/events/subscribeToAnEvent/${ID}/${ID2}`],
@@ -114,9 +117,6 @@ const protectedRoutes: [string, string][] = [
 // Rutas que NO exigen token (algunas probablemente deberían; ver tests de cada recurso).
 const publicRoutes: [string, string, number][] = [
   ["get", "/api/events/getPublicEvents", 200],
-  ["get", `/api/events/getEventById/${ID}`, 404],
-  ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`, 500],
-  ["get", `/api/events/getMembersAmount/${ID}`, 404],
   ["get", "/api/cron/reminderCheck", 200],
 ];
 

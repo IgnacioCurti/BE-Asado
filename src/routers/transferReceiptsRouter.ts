@@ -4,6 +4,7 @@ import {
   shoppingDesignee,
   eventParticipant,
   multerUpload,
+  transferReceiptOwner,
 } from "../middleware/middleware.js";
 import { asyncHandler } from "../core/http/asyncHandler.js";
 import { transferReceiptController as controller } from "../modules/transferReceipts/index.js";
@@ -46,6 +47,10 @@ transferReceiptRouter.put(
   handle(controller.approve)
 );
 
-transferReceiptRouter.delete("/deleteTransferReceipt/:id", [auth], handle(controller.delete));
+transferReceiptRouter.delete(
+  "/deleteTransferReceipt/:id",
+  [auth, transferReceiptOwner],
+  handle(controller.delete)
+);
 
 export default transferReceiptRouter;

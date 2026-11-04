@@ -53,8 +53,8 @@ export class EventController {
       .json(await this.service.unsubscribe(req.params.event, req.params.id));
   };
 
-  editRoles = async (req: Request, res: Response): Promise<Response> => {
-    const event = await this.service.editRoles(req.params.id, {
+  editRoles = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    const event = await this.service.editRoles(req.params.id, req.user._id, {
       chef: req.body.chef,
       shoppingDesignee: req.body.shoppingDesignee,
     });
@@ -75,8 +75,10 @@ export class EventController {
     return res.status(STATUS_CODES.OK).json(event);
   };
 
-  create = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.CREATED).json(await this.service.create(req.body));
+  create = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.CREATED)
+      .json(await this.service.create(req.user._id, req.body));
   };
 
   delete = async (req: Request, res: Response): Promise<Response> => {

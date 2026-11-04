@@ -101,42 +101,88 @@ describe("PurchaseReceiptService.attachFile", () => {
 });
 
 describe("PurchaseReceiptService.assignParticipants", () => {
-  it("si un recibo no existe corta ahí, con los anteriores ya guardados", async () => {
-    const { service, receipts } = setup();
-    const first = { participants: [] as any[] };
-    receipts.findById.mockResolvedValueOnce(first).mockResolvedValueOnce(null);
-    const participants = [id()];
+  const designee = id();
+  const member = id();
 
+  function withReceipt() {
+    const ctx = setup();
+    const ev = event("closed", [designee, member], { shoppingDesignee: [designee] });
+    const receipt = { _id: id(), event: ev._id, participants: [designee] as any[] };
+    ctx.events.findById.mockResolvedValue(ev);
+    return { ...ctx, ev, receipt };
+  }
+
+  it("el comprador reemplaza los participantes por miembros del evento", async () => {
+    const { service, receipts, receipt } = withReceipt();
+    receipts.findById.mockResolvedValue(receipt);
+    await service.assignParticipants(String(designee), [{ id: String(receipt._id), participants: [member, member] }]);
+    expect(receipt.participants.map(String)).toEqual([String(member)]);
+    expect(receipts.save).toHaveBeenCalledWith(receipt);
+  });
+
+  it("si un recibo no existe no guarda ninguno", async () => {
+    const { service, receipts, receipt } = withReceipt();
+    receipts.findById.mockResolvedValueOnce(receipt).mockResolvedValueOnce(null);
     await expect(
-      service.assignParticipants([
-        { id: "a", participants },
-        { id: "b", participants: [] },
+      service.assignParticipants(String(designee), [
+        { id: String(receipt._id), participants: [member] },
+        { id: String(id()), participants: [] },
       ])
     ).rejects.toEqual(new NotFoundError("One or more purchase receipts were not found"));
-    expect(first.participants).toBe(participants);
-    expect(receipts.save).toHaveBeenCalledTimes(1);
+    expect(receipt.participants).toEqual([designee]);
+    expect(receipts.save).not.toHaveBeenCalled();
+  });
+
+  it("quien no es comprador del evento del recibo -> ForbiddenError", async () => {
+    const { service, receipts, receipt } = withReceipt();
+    receipts.findById.mockResolvedValue(receipt);
+    await expect(
+      service.assignParticipants(String(member), [{ id: String(receipt._id), participants: [] }])
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(receipts.save).not.toHaveBeenCalled();
+  });
+
+  it("participantes que no son miembros o body inválido -> BadRequestError", async () => {
+    const { service, receipts, receipt } = withReceipt();
+    receipts.findById.mockResolvedValue(receipt);
+    await expect(
+      service.assignParticipants(String(designee), [{ id: String(receipt._id), participants: [id()] }])
+    ).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.assignParticipants(String(designee), undefined)).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.assignParticipants(String(designee), [{ id: "abc", participants: [] }])).rejects.toBeInstanceOf(BadRequestError);
   });
 });
 
 describe("PurchaseReceiptService.delete", () => {
   it("lo quita del evento y lo borra", async () => {
     const { service, receipts, events } = setup();
-    const receipt = { _id: id(), event: id() };
-    const ev = event("closed", [], { purchaseReceipts: [id(), receipt._id] });
+    const eventId = id();
+    const receipt = { _id: id(), event: eventId };
+    const ev = event("closed", [], { _id: eventId, purchaseReceipts: [id(), receipt._id] });
     receipts.findById.mockResolvedValue(receipt);
     events.findById.mockResolvedValue(ev);
 
-    expect(await service.delete("r")).toBe(receipt);
+    expect(await service.delete(String(receipt._id), String(eventId))).toBe(receipt);
     expect(ev.purchaseReceipts).toHaveLength(1);
     expect(events.save).toHaveBeenCalledWith(ev);
-    expect(receipts.deleteById).toHaveBeenCalledWith("r");
+    expect(receipts.deleteById).toHaveBeenCalledWith(String(receipt._id));
+  });
+
+  it("un recibo de otro evento -> NotFoundError y no borra", async () => {
+    const { service, receipts } = setup();
+    const receipt = { _id: id(), event: id() };
+    receipts.findById.mockResolvedValue(receipt);
+    await expect(service.delete(String(receipt._id), String(id()))).rejects.toBeInstanceOf(NotFoundError);
+    expect(receipts.deleteById).not.toHaveBeenCalled();
   });
 
   it("evento que no está cerrado -> BadRequestError y no borra", async () => {
     const { service, receipts, events } = setup();
-    receipts.findById.mockResolvedValue({ _id: id(), event: id() });
+    const eventId = id();
+    const receipt = { _id: id(), event: eventId };
+    receipts.findById.mockResolvedValue(receipt);
     events.findById.mockResolvedValue(event("readyforpayment", []));
-    await expect(service.delete("r")).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.delete(String(receipt._id), String(eventId))).rejects.toBeInstanceOf(BadRequestError);
     expect(receipts.deleteById).not.toHaveBeenCalled();
   });
 });

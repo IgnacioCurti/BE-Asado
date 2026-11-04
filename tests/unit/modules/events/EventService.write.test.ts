@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import mongoose from "mongoose";
 import { EventService } from "../../../../src/modules/events/EventService.js";
 import { EventMapper } from "../../../../src/modules/events/EventMapper.js";
-import { BadRequestError, NotFoundError } from "../../../../src/core/errors/AppError.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../../../src/core/errors/AppError.js";
 
 const id = () => new mongoose.Types.ObjectId();
 
@@ -174,13 +174,63 @@ describe("EventService.edit", () => {
 });
 
 describe("EventService.editRoles", () => {
-  it("chef vacío queda en null", async () => {
-    const { service, events } = setup();
-    const ev = event();
-    const designees = [id()];
-    events.findById.mockResolvedValue(ev);
-    await service.editRoles("e", { chef: undefined, shoppingDesignee: designees });
-    expect(ev.chef).toBeNull();
-    expect(ev.shoppingDesignee).toBe(designees);
+  const s = (oid: mongoose.Types.ObjectId) => String(oid);
+
+  function rolesSetup(extra: Record<string, unknown> = {}) {
+    const ctx = setup();
+    const me = id();
+    const other = id();
+    const ev = event({ members: [me, other], shoppingDesignee: [], chef: null, ...extra });
+    ctx.events.findById.mockResolvedValue(ev);
+    (ctx.events as any).updateRolesIfAllowed = vi.fn().mockResolvedValue(ev);
+    return { ...ctx, me, other, ev };
+  }
+
+  it("tomar chef y comprador: un solo update atómico con el cambio del usuario", async () => {
+    const { service, events, me, ev } = rolesSetup();
+    await service.editRoles(s(ev._id), s(me), { chef: s(me), shoppingDesignee: [s(me)] });
+    const [, change] = (events as any).updateRolesIfAllowed.mock.calls[0];
+    expect(change.chef).toEqual({ from: null, to: me });
+    expect(change.addDesignee).toEqual(me);
+    expect(change.removeDesignee).toBeUndefined();
+  });
+
+  it("soltar el chef propio: from = yo, to = null", async () => {
+    const { service, events, me, ev } = rolesSetup();
+    ev.chef = me;
+    await service.editRoles(s(ev._id), s(me), { chef: "", shoppingDesignee: [] });
+    const [, change] = (events as any).updateRolesIfAllowed.mock.calls[0];
+    expect(change.chef).toEqual({ from: me, to: null });
+  });
+
+  it("cambiar roles de otro -> ForbiddenError", async () => {
+    const { service, me, other, ev } = rolesSetup();
+    await expect(service.editRoles(s(ev._id), s(me), { chef: s(other), shoppingDesignee: [] })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.editRoles(s(ev._id), s(me), { shoppingDesignee: [s(other)] })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("chef ocupado -> ConflictError", async () => {
+    const { service, me, other, ev } = rolesSetup();
+    ev.chef = other;
+    await expect(service.editRoles(s(ev._id), s(me), { chef: s(me), shoppingDesignee: [] })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("evento que no está disponible -> ConflictError; sin cambios no escribe", async () => {
+    const { service, events, me, ev } = rolesSetup({ state: "closed" });
+    await expect(service.editRoles(s(ev._id), s(me), { shoppingDesignee: [s(me)] })).rejects.toBeInstanceOf(ConflictError);
+    await service.editRoles(s(ev._id), s(me), { chef: null, shoppingDesignee: [] });
+    expect((events as any).updateRolesIfAllowed).not.toHaveBeenCalled();
+  });
+
+  it("si el update atómico no encuentra el evento como se esperaba -> ConflictError", async () => {
+    const { service, events, me, ev } = rolesSetup();
+    (events as any).updateRolesIfAllowed.mockResolvedValue(null);
+    await expect(service.editRoles(s(ev._id), s(me), { chef: s(me) })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("no miembro -> ForbiddenError; id mal formado -> BadRequestError", async () => {
+    const { service, ev } = rolesSetup();
+    await expect(service.editRoles(s(ev._id), s(id()), {})).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.editRoles("abc", s(id()), {})).rejects.toBeInstanceOf(BadRequestError);
   });
 });

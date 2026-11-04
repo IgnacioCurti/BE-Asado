@@ -112,12 +112,14 @@ describe("GET /api/events/getPublicEvents", () => {
     expect(publicEvent.shoppingDesignee[0]).toMatchObject({ _id: organizer._id, name: organizer.name });
   });
 
-  it("[SEGURIDAD - comportamiento actual] endpoint público que expone el hash de contraseña de los shoppingDesignee", async () => {
+  it("los shoppingDesignee poblados no incluyen el hash ni los datos del código de recuperación", async () => {
     const organizer = await createUser({ verificationCodePlain: "123456" });
     await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
     const res = await api().get("/api/events/getPublicEvents");
-    expect(res.body[0].shoppingDesignee[0].password).toBe(organizer.password);
-    expect(res.body[0].shoppingDesignee[0].verificationCode).toEqual(expect.any(String));
+    const designee = res.body[0].shoppingDesignee[0];
+    expect(designee).toMatchObject({ _id: organizer._id, name: organizer.name });
+    for (const field of ["password", "verificationCode", "verificationCodeExpiresAt", "verificationAttempts"])
+      expect(designee).not.toHaveProperty(field);
   });
 
   it("sin chef ni calificaciones: chef null y ratings en 0", async () => {
@@ -205,7 +207,7 @@ describe("GET /api/events/getPublicAndPrivateEvents", () => {
 });
 
 describe("GET /api/events/getEventById/:id", () => {
-  it("devuelve el evento con relaciones pobladas (endpoint público)", async () => {
+  it("devuelve el evento con relaciones pobladas", async () => {
     const organizer = await createUser({ name: "Orga" });
     const chef = await createUser({ name: "Chef" });
     const event = await createEvent({
@@ -225,7 +227,7 @@ describe("GET /api/events/getEventById/:id", () => {
     const option = await createOption({ event: event._id, title: "Vacío", participants: [chef._id] });
     const rating = await createRating({ event: event._id, user: chef._id, score: 5 });
 
-    const res = await api().get(`/api/events/getEventById/${event._id}`);
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(chef.token));
 
     expect(res.status).toBe(200);
     const body = res.body;
@@ -253,30 +255,67 @@ describe("GET /api/events/getEventById/:id", () => {
     expect(body.ratings).toEqual([rating._id]);
   });
 
-  it("[SEGURIDAD - comportamiento actual] endpoint público que expone hashes de contraseña de miembros/organizador", async () => {
-    const organizer = await createUser();
-    const event = await createEvent({ organizer: organizer._id });
-    const res = await api().get(`/api/events/getEventById/${event._id}`);
-    expect(res.body.organizer.password).toBe(organizer.password);
-    expect(res.body.members[0].password).toBe(organizer.password);
+  it("los usuarios poblados no incluyen el hash ni los datos del código de recuperación", async () => {
+    const organizer = await createUser({ verificationCodePlain: "123456" });
+    const event = await createEvent({ organizer: organizer._id, chef: organizer._id, shoppingDesignee: [organizer._id] });
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(organizer.token));
+    const users = [res.body.organizer, res.body.chef, res.body.members[0], res.body.shoppingDesignee[0]];
+    for (const user of users) {
+      expect(user._id).toBe(organizer._id);
+      for (const field of ["password", "verificationCode", "verificationCodeExpiresAt", "verificationAttempts"])
+        expect(user).not.toHaveProperty(field);
+    }
   });
 
   it("chef null si no hay chef", async () => {
     const organizer = await createUser();
     const event = await createEvent({ organizer: organizer._id });
-    const res = await api().get(`/api/events/getEventById/${event._id}`);
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(organizer.token));
     expect(res.body.chef).toBeNull();
   });
 
+  it("evento público: lo ve cualquier usuario autenticado aunque no sea miembro", async () => {
+    const organizer = await createUser();
+    const stranger = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
+    expect(res.status).toBe(200);
+    expect(res.body._id).toBe(event._id);
+  });
+
+  it("evento privado: lo ve cualquier usuario autenticado con el id (link para sumarse)", async () => {
+    const organizer = await createUser();
+    const stranger = await createUser();
+    const event = await createEvent({ organizer: organizer._id, isPrivate: true });
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("evento privado: un miembro lo ve", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id, isPrivate: true });
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(organizer.token));
+    expect(res.status).toBe(200);
+  });
+
+  it("sin token -> 401", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    expect((await api().get(`/api/events/getEventById/${event._id}`)).status).toBe(401);
+  });
+
   it("inexistente -> 404", async () => {
-    const res = await api().get(`/api/events/getEventById/${newId()}`);
+    const me = await createUser();
+    const res = await api().get(`/api/events/getEventById/${newId()}`).set(auth(me.token));
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ message: "The event with the given ID was not found." });
   });
 
-  it("[comportamiento actual] id mal formado -> 500", async () => {
-    const res = await api().get("/api/events/getEventById/abc");
-    expect(res.status).toBe(500);
+  it("id mal formado -> 400", async () => {
+    const me = await createUser();
+    const res = await api().get("/api/events/getEventById/abc").set(auth(me.token));
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "Invalid ObjectID" });
   });
 });
 
@@ -289,7 +328,7 @@ describe("GET /api/events/getMembersAndReceiptsInfo/:event", () => {
     const betoReceipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 10, hasPaid: true });
     const caroReceipt = await createTransferReceipt({ event: event._id, user: caro._id, amount: 10 });
 
-    const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`);
+    const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`).set(auth(beto.token));
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
@@ -323,15 +362,30 @@ describe("GET /api/events/getMembersAndReceiptsInfo/:event", () => {
     ]);
   });
 
-  it("es público (no requiere token)", async () => {
+  it("sin token -> 401", async () => {
     const ana = await createUser();
     const event = await createEvent({ organizer: ana._id });
-    expect((await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`)).status).toBe(200);
+    expect((await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`)).status).toBe(401);
   });
 
-  it("[comportamiento actual] evento inexistente -> 500", async () => {
-    const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${newId()}`);
-    expect(res.status).toBe(500);
+  it("evento privado: un no miembro recibe 403", async () => {
+    const ana = await createUser();
+    const stranger = await createUser();
+    const event = await createEvent({ organizer: ana._id, isPrivate: true });
+    const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`).set(auth(stranger.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("evento inexistente -> 404", async () => {
+    const me = await createUser();
+    const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${newId()}`).set(auth(me.token));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The event with the given ID does not exist." });
+  });
+
+  it("id mal formado -> 400", async () => {
+    const me = await createUser();
+    expect((await api().get("/api/events/getMembersAndReceiptsInfo/abc").set(auth(me.token))).status).toBe(400);
   });
 });
 
@@ -343,7 +397,7 @@ describe("GET /api/events/getMembersAmount/:event", () => {
     const event = await createEvent({ organizer: ana._id, members: [ana._id, beto._id, caro._id] });
     await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 300, participants: [ana._id, beto._id, caro._id] });
 
-    const res = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(ana.token));
 
     const toAna = {
       receiverId: ana._id,
@@ -367,35 +421,57 @@ describe("GET /api/events/getMembersAmount/:event", () => {
     const event = await createEvent({ organizer: ana._id, members: [ana._id, beto._id, ausente._id] });
     await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 50, participants: [beto._id] });
 
-    const res = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(ana.token));
     expect(res.body.map((t: any) => t.userId)).toEqual([beto._id, ana._id]);
   });
 
-  it("[comportamiento actual] un comprobante sin participantes produce amount null (NaN serializado)", async () => {
+  it("un comprobante sin participantes no lo paga nadie (monto 0, no null)", async () => {
     const ana = await createUser();
-    const event = await createEvent({ organizer: ana._id });
+    const beto = await createUser();
+    const event = await createEvent({ organizer: ana._id, members: [ana._id, beto._id] });
     await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 50, participants: [] });
-    const res = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 30, participants: [beto._id] });
+    const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(ana.token));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([expect.objectContaining({ userId: ana._id, amount: null })]);
+    expect(res.body).toEqual([
+      expect.objectContaining({ userId: beto._id, amount: 30 }),
+      expect.objectContaining({ userId: ana._id, amount: 0, receiver: null }),
+    ]);
   });
 
   it("sin comprobantes de compra -> 400", async () => {
     const ana = await createUser();
     const event = await createEvent({ organizer: ana._id });
-    const res = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(ana.token));
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "The event has no purchase receipts." });
   });
 
-  it("evento inexistente -> 404", async () => {
-    const res = await api().get(`/api/events/getMembersAmount/${newId()}`);
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ message: "The event with the given ID was not found." });
+  it("sin token -> 401", async () => {
+    const ana = await createUser();
+    const event = await createEvent({ organizer: ana._id });
+    expect((await api().get(`/api/events/getMembersAmount/${event._id}`)).status).toBe(401);
   });
 
-  it("[comportamiento actual] id mal formado -> 500", async () => {
-    expect((await api().get("/api/events/getMembersAmount/abc")).status).toBe(500);
+  it("evento privado: un no miembro recibe 403", async () => {
+    const ana = await createUser();
+    const stranger = await createUser();
+    const event = await createEvent({ organizer: ana._id, isPrivate: true });
+    await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 50, participants: [ana._id] });
+    const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(stranger.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("evento inexistente -> 404", async () => {
+    const me = await createUser();
+    const res = await api().get(`/api/events/getMembersAmount/${newId()}`).set(auth(me.token));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The event with the given ID does not exist." });
+  });
+
+  it("id mal formado -> 400", async () => {
+    const me = await createUser();
+    expect((await api().get("/api/events/getMembersAmount/abc").set(auth(me.token))).status).toBe(400);
   });
 });
 
@@ -426,7 +502,7 @@ describe("GET /api/events/getMemberIndividualCost/:user/:event", () => {
   it("coincide con el costo que usa getMembersAmount", async () => {
     const { ana, caro, event } = await scenario("readyforpayment");
     const cost = await api().get(`/api/events/getMemberIndividualCost/${caro._id}/${event._id}`).set(auth(ana.token));
-    const amounts = await api().get(`/api/events/getMembersAmount/${event._id}`);
+    const amounts = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(ana.token));
     const caroTransfer = amounts.body.find((t: any) => t.userId === caro._id);
     expect(caroTransfer.amount).toBe(cost.body.userAmount);
   });

@@ -64,7 +64,7 @@ describe("UserService.register", () => {
 describe("UserService.edit", () => {
   const notifications = { newEvent: true, eventStart: true, penalizationStart: false, penalizationOneWeek: false };
 
-  it("conserva nombre y notificaciones no enviados; alias y cbu se reemplazan siempre", async () => {
+  it("conserva nombre, alias, cbu y notificaciones no enviados", async () => {
     const { service, users } = setup();
     const user = { name: "Ana", lastName: "Paz", specialDiet: [], alias: "ana.mp", cbu: "123", notifications: { ...notifications } };
     users.findById.mockResolvedValue(user);
@@ -74,8 +74,8 @@ describe("UserService.edit", () => {
     expect(user).toMatchObject({
       name: "Ana",
       lastName: "Gil",
-      alias: undefined,
-      cbu: undefined,
+      alias: "ana.mp",
+      cbu: "123",
       notifications: { ...notifications, eventStart: false },
     });
     expect(users.save).toHaveBeenCalledWith(user);
@@ -145,11 +145,9 @@ describe("UserService.getEventsWithPendingTransfers", () => {
     expect(await service.getEventsWithPendingTransfers(String(designee))).toEqual([pending._id]);
   });
 
-  it("id mal formado lanza un error genérico (500)", async () => {
+  it("id mal formado -> BadRequestError", async () => {
     const { service } = setup();
-    const error = await service.getEventsWithPendingTransfers("abc").catch((e) => e);
-    expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(BadRequestError);
+    await expect(service.getEventsWithPendingTransfers("abc")).rejects.toEqual(new BadRequestError("Invalid ObjectID"));
   });
 });
 

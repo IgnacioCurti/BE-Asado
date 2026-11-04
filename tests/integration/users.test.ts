@@ -276,11 +276,18 @@ describe("PUT /api/users/editUser/:id", () => {
     expect(res.body).not.toHaveProperty("alternativeEmail");
   });
 
-  it("si alias/cbu no vienen, se borran del documento", async () => {
+  it("si alias/cbu no vienen, se conservan", async () => {
     const user = await createUser({ alias: "ana.mp", cbu: "123" });
     const res = await api().put(`/api/users/editUser/${user._id}`).set(auth(user.token)).send({ specialDiet: [] });
     expect(res.status).toBe(200);
-    expect(res.body.alias ?? null).toBeNull();
+    expect(res.body).toMatchObject({ alias: "ana.mp", cbu: "123" });
+  });
+
+  it("enviarlos vacíos (\"\" o null) los borra", async () => {
+    const user = await createUser({ alias: "ana.mp", cbu: "123" });
+    const res = await api().put(`/api/users/editUser/${user._id}`).set(auth(user.token)).send({ alias: "", cbu: null });
+    expect(res.status).toBe(200);
+    expect(res.body.alias || null).toBeNull();
     expect(res.body.cbu ?? null).toBeNull();
   });
 

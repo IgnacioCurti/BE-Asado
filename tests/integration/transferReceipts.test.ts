@@ -64,21 +64,31 @@ describe("GET /api/transferReceipts/getTransferReceiptsByEvent/:event", () => {
 });
 
 describe("GET /api/transferReceipts/getTransferReceiptsById/:id", () => {
-  it("[comportamiento actual] cualquier usuario autenticado puede ver cualquier comprobante", async () => {
+  it("cualquier miembro del evento lo ve (por ejemplo, el comprador que lo aprueba)", async () => {
+    const { ana, beto, caro, event } = await paymentScenario();
+    const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
+    for (const user of [ana, beto, caro]) {
+      const res = await api().get(`/api/transferReceipts/getTransferReceiptsById/${receipt._id}`).set(auth(user.token));
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ _id: receipt._id, amount: 100 });
+    }
+  });
+
+  it("quien no es miembro del evento del comprobante -> 403", async () => {
     const { beto, event } = await paymentScenario();
     const stranger = await createUser();
     const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
     const res = await api().get(`/api/transferReceipts/getTransferReceiptsById/${receipt._id}`).set(auth(stranger.token));
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ _id: receipt._id, amount: 100 });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "Access denied. The user is not a participant of the event." });
   });
 
-  it("inexistente -> 404; mal formado -> 500", async () => {
+  it("inexistente -> 404; mal formado -> 400", async () => {
     const user = await createUser();
     const notFound = await api().get(`/api/transferReceipts/getTransferReceiptsById/${newId()}`).set(auth(user.token));
     expect(notFound.status).toBe(404);
     expect(notFound.body).toEqual({ message: "The transfer receipt with the given ID was not found." });
-    expect((await api().get("/api/transferReceipts/getTransferReceiptsById/abc").set(auth(user.token))).status).toBe(500);
+    expect((await api().get("/api/transferReceipts/getTransferReceiptsById/abc").set(auth(user.token))).status).toBe(400);
   });
 });
 
@@ -373,12 +383,13 @@ describe("PUT /api/transferReceipts/approveTransferReceipt/:id/:event", () => {
     expect((await findTransferReceipt(receipt._id))!.hasPaid).toBe(false);
   });
 
-  it("[SEGURIDAD - comportamiento actual] el comprador de un evento puede aprobar comprobantes de otro evento", async () => {
+  it("el comprador de un evento no puede aprobar comprobantes de otro evento -> 404", async () => {
     const { ana, event } = await paymentScenario();
     const other = await paymentScenario();
     const foreign = await createTransferReceipt({ event: other.event._id, user: other.beto._id, amount: 100 });
     const res = await api().put(`/api/transferReceipts/approveTransferReceipt/${foreign._id}/${event._id}`).set(auth(ana.token));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
+    expect((await findTransferReceipt(foreign._id))!.hasPaid).toBe(false);
   });
 });
 
@@ -524,19 +535,23 @@ describe("DELETE /api/transferReceipts/deleteTransferReceipt/:id", () => {
     expect((await findEvent(event._id))!.transferReceipts).toEqual([receipt._id]);
   });
 
-  it("[SEGURIDAD - comportamiento actual] cualquier usuario autenticado puede borrar el comprobante de otro", async () => {
-    const { beto, event } = await paymentScenario();
+  it("solo el dueño lo borra: otro usuario (aunque sea el comprador) -> 403", async () => {
+    const { ana, beto, event } = await paymentScenario();
     const stranger = await createUser();
     const receipt = await createTransferReceipt({ event: event._id, user: beto._id, amount: 100 });
-    const res = await api().delete(`/api/transferReceipts/deleteTransferReceipt/${receipt._id}`).set(auth(stranger.token));
-    expect(res.status).toBe(200);
-    expect(await listTransferReceipts()).toEqual([]);
+    for (const user of [stranger, ana]) {
+      const res = await api().delete(`/api/transferReceipts/deleteTransferReceipt/${receipt._id}`).set(auth(user.token));
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ message: "Access denied. The user is not the owner of the receipt." });
+    }
+    expect(await findTransferReceipt(receipt._id)).not.toBeNull();
   });
 
-  it("inexistente -> 404", async () => {
+  it("inexistente -> 404; mal formado -> 400", async () => {
     const user = await createUser();
     const res = await api().delete(`/api/transferReceipts/deleteTransferReceipt/${newId()}`).set(auth(user.token));
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ message: "The transfer receipt with the given ID was not found." });
+    expect(res.body).toEqual({ message: "The transfer receipt with the given ID does not exist." });
+    expect((await api().delete("/api/transferReceipts/deleteTransferReceipt/abc").set(auth(user.token))).status).toBe(400);
   });
 });

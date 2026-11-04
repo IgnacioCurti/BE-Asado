@@ -6,7 +6,7 @@ migrarla (de base de datos, ORM o framework) y verificar que nada cambió sin qu
 ```bash
 npm test                  # todo
 npm run test:unit         # sin base de datos
-npm run test:integration  # Mongo en memoria (mongodb-memory-server)
+npm run test:integration  # Mongo en memoria (mongodb-memory-server, replica set de un nodo: hay transacciones)
 npm run test:coverage
 ```
 

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { STATUS_CODES } from "../../constants/httpStatusCode.js";
-import { AuthService, InvalidVerificationCodeError } from "./AuthService.js";
+import { AuthService } from "./AuthService.js";
 
 export class AuthController {
   constructor(private readonly service: AuthService) {}
@@ -16,14 +16,7 @@ export class AuthController {
   };
 
   verifyCode = async (req: Request, res: Response): Promise<Response> => {
-    try {
-      await this.service.verifyCode(req.body.email, req.body.verificationCode);
-    } catch (error) {
-      // Contrato heredado: este endpoint responde el mensaje como string suelto.
-      if (error instanceof InvalidVerificationCodeError)
-        return res.status(error.status).json(error.message);
-      throw error;
-    }
+    await this.service.verifyCode(req.body.email, req.body.verificationCode);
     return res.status(STATUS_CODES.OK).json({ message: "Verification code is correct." });
   };
 

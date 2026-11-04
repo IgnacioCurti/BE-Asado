@@ -380,6 +380,14 @@ export async function countImages(): Promise<number> {
 // ---------------------------------------------------------------- fallas
 
 /** Hace fallar toda lectura/consulta a la base hasta el final del test (restoreMocks la deshace). */
+// Hace fallar el próximo deleteMany de un modelo (p. ej. "Option"), para
+// probar que un borrado en varias colecciones es atómico.
+export function simulateDeleteFailure(modelName: string, message: string): void {
+  vi.spyOn(mongoose.model(modelName), "deleteMany").mockImplementationOnce(() => {
+    throw new Error(message);
+  });
+}
+
 export function simulateDatabaseFailure(message: string): void {
   vi.spyOn(mongoose.Query.prototype, "exec").mockRejectedValue(new Error(message));
 }

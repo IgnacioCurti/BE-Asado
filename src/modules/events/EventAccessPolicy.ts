@@ -34,6 +34,17 @@ export class EventAccessPolicy {
       throw new ForbiddenError("Access denied. The user is not a participant of the event.");
   }
 
+  // Ver los pagos de un evento. Provisorio hasta que exista Event.group (GROUPS_FEATURE.md §5.1):
+  // los de un evento público los ve cualquier usuario autenticado; los de uno privado, solo sus miembros.
+  // Con grupos pasa a ser "miembro del grupo del evento o miembro del evento".
+  async assertViewer(eventId: string, userId: string): Promise<void> {
+    this.assertValidIds(eventId);
+    const event: IEvent = await this.getEvent(eventId);
+    if (!event.isPrivate) return;
+    if (!event.members.some((member) => member.toString() === userId))
+      throw new ForbiddenError("Access denied. The user is not a participant of the event.");
+  }
+
   async assertShoppingDesignee(eventId: string, userId: string): Promise<void> {
     this.assertValidIds(userId, eventId);
     const event: IEvent = await this.getEvent(eventId);

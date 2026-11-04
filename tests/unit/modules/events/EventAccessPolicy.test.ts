@@ -52,6 +52,24 @@ describe("EventAccessPolicy por rol", () => {
   });
 });
 
+describe("EventAccessPolicy.assertViewer", () => {
+  it("evento público: cualquier usuario lo ve", async () => {
+    const { policy } = setup({ ...event, isPrivate: false });
+    await expect(policy.assertViewer(eventId, s(outsider))).resolves.toBeUndefined();
+  });
+
+  it("evento privado: pasa un miembro y rechaza a quien no lo es", async () => {
+    const { policy } = setup({ ...event, isPrivate: true });
+    await expect(policy.assertViewer(eventId, s(member))).resolves.toBeUndefined();
+    await expect(policy.assertViewer(eventId, s(outsider))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("id inválido -> BadRequestError; inexistente -> NotFoundError", async () => {
+    await expect(setup().policy.assertViewer("abc", s(member))).rejects.toBeInstanceOf(BadRequestError);
+    await expect(setup(null).policy.assertViewer(eventId, s(member))).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe("EventAccessPolicy opciones", () => {
   it("assertOptionManager con :event busca el evento por id", async () => {
     const { policy, events } = setup();
