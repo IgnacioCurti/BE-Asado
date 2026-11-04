@@ -3,6 +3,7 @@ import { BadRequestError, ForbiddenError, NotFoundError } from "../../core/error
 import { isValidId } from "../../core/validation/isValidId.js";
 import {
   IEvent,
+  IEventAmountCalculationsWithTransfers,
   IEventWithMembersTransferReceipts,
   IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts,
   IEventWithTransferReceipts,
@@ -10,6 +11,7 @@ import {
   IMemberWhoHasUploaded,
   ITransferInfo,
   ITransferReceipt,
+  IUser,
 } from "../../models/interfaces.js";
 import { nowArgentina } from "../../utils/dates.js";
 import { EventRepository } from "../events/EventRepository.js";
@@ -36,6 +38,7 @@ export interface TransferReceiptServiceDeps {
     | "findByIdWithTransferReceipts"
     | "findByIdWithMembersAndTransferReceipts"
     | "findByIdWithPaymentData"
+    | "findByIdWithDebtData"
   >;
   images: Pick<ImageService, "save" | "delete">;
   payments: Pick<PaymentCalculator, "expectedTransfersFor">;
@@ -188,6 +191,21 @@ export class TransferReceiptService {
       .every((transfer) =>
         event!.transferReceipts.some((r) => r.hasPaid === true && r.user.equals(transfer.userId))
       );
+  }
+
+  // Miembros que deben transferir y no tienen un comprobante aprobado.
+  async getDebtors(eventId: string | mongoose.Types.ObjectId): Promise<IUser[]> {
+    const event: IEventAmountCalculationsWithTransfers | null =
+      await this.events.findByIdWithDebtData(eventId);
+    if (!event) throw new Error(`Event with ID ${eventId} not found.`);
+    return this.payments
+      .expectedTransfersFor(event.purchaseReceipts)
+      .filter((transfer) => {
+        const receipt = event.transferReceipts.find((r) => r.user._id.equals(transfer.userId));
+        return !receipt || !receipt.hasPaid;
+      })
+      .map((transfer) => event.members.find((member) => member._id.equals(transfer.userId)))
+      .filter((user): user is IUser => user !== undefined);
   }
 
   // Estado de pago de cada miembro del evento (usado por events).

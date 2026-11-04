@@ -1,15 +1,6 @@
-import mongoose from "mongoose";
 import { brevo } from "../config.js";
 import https from "https";
-import {
-  IEventAmountCalculationsWithTransfers,
-  ITransferInfo,
-  IUser,
-  IUserBalance,
-} from "../models/interfaces.js";
-import { Event } from "../models/event.js";
 import { isValidId } from "../core/validation/isValidId.js";
-import { paymentCalculator } from "../modules/payments/PaymentCalculator.js";
 
 function sendEmail(
   email: string,
@@ -56,54 +47,4 @@ function sendEmail(
   });
 }
 
-async function getEventsDebtors(eventId: string): Promise<IUser[]> {
-  const event: IEventAmountCalculationsWithTransfers | null =
-    await Event.findById(eventId).populate([
-      {
-        path: "purchaseReceipts",
-        populate: [
-          {
-            path: "shoppingDesignee",
-            model: "User",
-          },
-          {
-            path: "participants",
-            model: "User",
-          },
-        ],
-      },
-      {
-        path: "members",
-        model: "User",
-      },
-      {
-        path: "transferReceipts",
-        populate: {
-          path: "user",
-          model: "User",
-        },
-      },
-    ]);
-
-  if (!event) {
-    throw new Error(`Event with ID ${eventId} not found.`);
-  }
-
-  const expectedTransfers: ITransferInfo[] =
-    paymentCalculator.expectedTransfersFor(event.purchaseReceipts);
-
-  const debtors: IUser[] = expectedTransfers
-    .filter((transfer) => {
-      const receipt = event.transferReceipts.find((r) =>
-        r.user._id.equals(transfer.userId)
-      );
-      return !receipt || !receipt.hasPaid;
-    })
-    .map((transfer) =>
-      event.members.find((member) => member._id.equals(transfer.userId))
-    )
-    .filter((user): user is IUser => user !== undefined);
-  return debtors;
-}
-
-export { isValidId, sendEmail, getEventsDebtors };
+export { isValidId, sendEmail };

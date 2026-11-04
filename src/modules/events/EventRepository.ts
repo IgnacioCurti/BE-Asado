@@ -9,6 +9,7 @@ import {
   IEventWithPurchaseReceiptsOptions,
   IPublicEventPreReduction,
   IEventAmountCalculationsWithTransfers,
+  IEventWithMembers,
   IEventWithMembersPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulated,
   IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts,
@@ -267,5 +268,32 @@ export class EventRepository extends BaseRepository<IEvent> {
       .findById(id)
       .populate(["transferReceipts", "purchaseReceipts", "ratings"])
       .exec() as unknown as Promise<IEventWithTransferReceiptsPurchaseReceiptsRatings | null>;
+  }
+
+  findByIdWithMembers(id: string): Promise<IEventWithMembers | null> {
+    return this.model
+      .findById(id)
+      .populate("members")
+      .exec() as unknown as Promise<IEventWithMembers | null>;
+  }
+
+  // Recibos, miembros y comprobantes con su usuario, para saber quién debe.
+  findByIdWithDebtData(
+    id: string | mongoose.Types.ObjectId
+  ): Promise<IEventAmountCalculationsWithTransfers | null> {
+    return this.model
+      .findById(id)
+      .populate([
+        {
+          path: "purchaseReceipts",
+          populate: [
+            { path: "shoppingDesignee", model: "User" },
+            { path: "participants", model: "User" },
+          ],
+        },
+        { path: "members", model: "User" },
+        { path: "transferReceipts", populate: { path: "user", model: "User" } },
+      ])
+      .exec() as unknown as Promise<IEventAmountCalculationsWithTransfers | null>;
   }
 }
