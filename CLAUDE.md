@@ -22,10 +22,10 @@ Verify commands against `package.json` before changing them.
 
 ## Context on demand
 
-- Business rules: `.claude/skills/be-asado-context/SKILL.md`
-- API changes: `.claude/skills/api-development/SKILL.md`
-- Node/TypeScript: `.claude/skills/node-typescript/SKILL.md`
-- MongoDB/Mongoose: `.claude/skills/mongodb-mongoose/SKILL.md`
-- Testing: `.claude/skills/testing/SKILL.md`
+- Business rules: `.claude/be-asado-context/SKILL.md`
+- API changes: `.claude/api-development/SKILL.md`
+- Node/TypeScript: `.claude/node-typescript/SKILL.md`
+- MongoDB/Mongoose: `.claude/mongodb-mongoose/SKILL.md`
+- Testing: `.claude/testing/SKILL.md`
 
 Inspect the actual repository structure before assuming file paths or architectural layers.

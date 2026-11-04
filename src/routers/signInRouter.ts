@@ -1,8 +1,9 @@
 import express from "express";
-import { login } from "../controllers/login.js";
+import { asyncHandler } from "../core/http/asyncHandler.js";
+import { authController } from "../modules/auth/index.js";
 
 const signInRouter: express.Router = express.Router();
 
-signInRouter.post("/", login);
+signInRouter.post("/", asyncHandler(authController.login));
 
 export default signInRouter;

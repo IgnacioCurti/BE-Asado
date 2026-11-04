@@ -1,0 +1,142 @@
+import { describe, expect, it, vi } from "vitest";
+import mongoose from "mongoose";
+import { EventService } from "../../../../src/modules/events/EventService.js";
+import { EventMapper } from "../../../../src/modules/events/EventMapper.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../../../src/core/errors/AppError.js";
+
+const id = () => new mongoose.Types.ObjectId();
+
+function setup() {
+  const events = {
+    findVisibleTo: vi.fn(),
+    findPublicSummaries: vi.fn(),
+    findSummariesVisibleTo: vi.fn(),
+    findByIdWithDetails: vi.fn(),
+    findByIdForAmounts: vi.fn(),
+    findByIdWithPurchaseReceiptIds: vi.fn(),
+  };
+  const transferReceipts = { membersWhoHaveUploaded: vi.fn() };
+  const payments = { transfersFor: vi.fn(), memberCost: vi.fn() };
+  const service = new EventService({ events, transferReceipts, payments, mapper: new EventMapper() } as any);
+  return { service, events, transferReceipts, payments };
+}
+
+describe("EventMapper.toPublic", () => {
+  const mapper = new EventMapper();
+  const base = {
+    _id: id(),
+    title: "Asado",
+    datetime: new Date("2026-01-01"),
+    description: "d",
+    state: "available",
+    memberLimit: 10,
+    shoppingDesignee: [],
+  };
+
+  it("resume miembros, chef y calificaciones", () => {
+    const result = mapper.toPublic({
+      ...base,
+      chef: { name: "Ana" },
+      members: [id(), id(), id()],
+      ratings: [{ score: 5 }, { score: 2 }],
+      isPrivate: true,
+      penalization: 10,
+      penalizationStartDate: new Date("2026-02-01"),
+    } as any);
+    expect(result).toMatchObject({
+      chef: "Ana",
+      members: 3,
+      ratings: { avgScore: 3.5, ratingsAmount: 2 },
+      isPrivate: true,
+      penalization: 10,
+    });
+    expect(result).not.toHaveProperty("organizer");
+  });
+
+  it("eventos viejos sin atributos: valores por defecto", () => {
+    const result = mapper.toPublic({ ...base, chef: null, members: [], penalization: 0 } as any);
+    expect(result).toMatchObject({
+      chef: null,
+      ratings: { avgScore: 0, ratingsAmount: 0 },
+      isPrivate: false,
+      penalization: null,
+      penalizationStartDate: null,
+    });
+  });
+});
+
+describe("EventService lecturas", () => {
+  it("getDetails inexistente -> NotFoundError", async () => {
+    const { service, events } = setup();
+    events.findByIdWithDetails.mockResolvedValue(null);
+    await expect(service.getDetails("e")).rejects.toEqual(new NotFoundError("The event with the given ID was not found."));
+  });
+
+  it("getTransfers sin recibos -> BadRequestError", async () => {
+    const { service, events } = setup();
+    events.findByIdForAmounts.mockResolvedValue({ purchaseReceipts: [] });
+    await expect(service.getTransfers("e")).rejects.toEqual(new BadRequestError("The event has no purchase receipts."));
+  });
+
+  it("getTransfers delega en PaymentCalculator", async () => {
+    const { service, events, payments } = setup();
+    const receipts = [{}];
+    const transfers = [{ amount: 10 }];
+    events.findByIdForAmounts.mockResolvedValue({ purchaseReceipts: receipts });
+    payments.transfersFor.mockReturnValue(transfers);
+    expect(await service.getTransfers("e")).toBe(transfers);
+    expect(payments.transfersFor).toHaveBeenCalledWith(receipts);
+  });
+});
+
+describe("EventService.getMemberCost", () => {
+  const organizer = id();
+  const designee = id();
+  const member = id();
+  const other = id();
+
+  function eventWith(state = "readyforpayment") {
+    return { organizer, shoppingDesignee: [designee], members: [organizer, designee, member, other], state, purchaseReceipts: [] };
+  }
+
+  it("un miembro ve su propio costo", async () => {
+    const { service, events, payments } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
+    payments.memberCost.mockReturnValue(42);
+    expect(await service.getMemberCost("e", String(member), String(member))).toBe(42);
+    expect(payments.memberCost).toHaveBeenCalledWith([], member);
+  });
+
+  it.each([
+    ["organizador", organizer],
+    ["designado", designee],
+  ])("el %s ve el costo de otro miembro", async (_label, requester) => {
+    const { service, events, payments } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
+    payments.memberCost.mockReturnValue(1);
+    await expect(service.getMemberCost("e", String(member), String(requester))).resolves.toBe(1);
+  });
+
+  it("un miembro no ve el costo de otro -> ForbiddenError", async () => {
+    const { service, events } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
+    await expect(service.getMemberCost("e", String(member), String(other))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("no miembro -> ForbiddenError", async () => {
+    const { service, events } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
+    const outsider = String(id());
+    await expect(service.getMemberCost("e", outsider, outsider)).rejects.toEqual(
+      new ForbiddenError("User is not a member of the event")
+    );
+  });
+
+  it("estado sin costos -> ForbiddenError", async () => {
+    const { service, events } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith("closed"));
+    await expect(service.getMemberCost("e", String(member), String(member))).rejects.toEqual(
+      new ForbiddenError("Event state needs to be either finished or ready for payment")
+    );
+  });
+});

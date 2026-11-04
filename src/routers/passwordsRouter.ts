@@ -1,12 +1,16 @@
 import express from "express";
-import { forgot, verifyCode, recover } from "../controllers/password.js";
+import { asyncHandler } from "../core/http/asyncHandler.js";
+import { authController } from "../modules/auth/index.js";
 
 const passwordRouter: express.Router = express.Router();
 
-passwordRouter.post("/forgot", forgot);
+// Mensaje por defecto con punto final, como respondía el controlador original.
+const fallbackMessage: string = "Internal server error.";
 
-passwordRouter.put("/verifyCode", verifyCode);
+passwordRouter.post("/forgot", asyncHandler(authController.forgot, fallbackMessage));
 
-passwordRouter.put("/recover", recover);
+passwordRouter.put("/verifyCode", asyncHandler(authController.verifyCode, fallbackMessage));
+
+passwordRouter.put("/recover", asyncHandler(authController.recover, fallbackMessage));
 
 export default passwordRouter;

@@ -18,7 +18,7 @@ Los tests nunca usan el `.env`: `vitest.config.ts` define todas las variables, y
 
 | Carpeta | Qué contiene |
 |--|--|
-| `unit/` | Funciones puras: cálculo de deudas (`assignEventValues`, `calculateTransfersInfo`), `isValidId`, `sendEmail`, templates, middlewares `auth`/`sameUser`, validaciones de los schemas |
+| `unit/` | Servicios con repositorios falsos y funciones puras: cálculo de deudas (`PaymentCalculator`), `isValidId`, `sendEmail`, templates, middlewares `auth`/`sameUser`, validaciones de los schemas |
 | `integration/` | Cada endpoint por HTTP (supertest) contra Mongo real, más un flujo end-to-end (`flow.test.ts`) |
 | `helpers/fixtures.ts` | **Única** capa que toca Mongoose: sembrar datos e inspeccionar efectos |
 | `helpers/mailer.ts` | Doble de Brevo: intercepta `https.request` y guarda los mails "enviados" en `sentEmails` |
