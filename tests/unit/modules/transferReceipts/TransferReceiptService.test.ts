@@ -92,17 +92,20 @@ describe("TransferReceiptService.create", () => {
 });
 
 describe("TransferReceiptService.approve", () => {
+  const eventId = id();
+  const rid = String(id());
+
   it("marca como pagado y, si era el último, finaliza el evento", async () => {
     const { service, receipts, events, payments } = setup();
     const user = id();
-    const receipt = { _id: id(), user, event: id(), hasPaid: false };
+    const receipt = { _id: id(), user, event: eventId, hasPaid: false };
     const ev = event("readyforpayment");
     receipts.findById.mockResolvedValue(receipt);
     events.findById.mockResolvedValue(ev);
     payments.expectedTransfersFor.mockReturnValue([{ userId: user }]);
     events.findByIdWithPaymentData.mockResolvedValue({ purchaseReceipts: [], transferReceipts: [receipt] });
 
-    await service.approve("r");
+    await service.approve(rid, String(eventId));
 
     expect(receipt.hasPaid).toBe(true);
     expect(ev.state).toBe("finished");
@@ -110,22 +113,32 @@ describe("TransferReceiptService.approve", () => {
 
   it("si quedan pagos pendientes no cambia el estado", async () => {
     const { service, receipts, events, payments } = setup();
-    receipts.findById.mockResolvedValue({ _id: id(), user: id(), event: id(), hasPaid: false });
+    receipts.findById.mockResolvedValue({ _id: id(), user: id(), event: eventId, hasPaid: false });
     payments.expectedTransfersFor.mockReturnValue([{ userId: id() }]);
-    await service.approve("r");
+    await service.approve(rid, String(eventId));
     expect(events.findById).not.toHaveBeenCalled();
   });
 
   it("ya aprobado -> BadRequestError", async () => {
     const { service, receipts } = setup();
-    receipts.findById.mockResolvedValue({ hasPaid: true });
-    await expect(service.approve("r")).rejects.toEqual(new BadRequestError("The transfer receipt is already approved."));
+    receipts.findById.mockResolvedValue({ hasPaid: true, event: eventId });
+    await expect(service.approve(rid, String(eventId))).rejects.toEqual(new BadRequestError("The transfer receipt is already approved."));
   });
 
-  it("inexistente -> NotFoundError", async () => {
+  it("comprobante de otro evento -> NotFoundError y no lo aprueba", async () => {
+    const { service, receipts } = setup();
+    const receipt = { _id: id(), user: id(), event: id(), hasPaid: false };
+    receipts.findById.mockResolvedValue(receipt);
+    await expect(service.approve(rid, String(eventId))).rejects.toBeInstanceOf(NotFoundError);
+    expect(receipt.hasPaid).toBe(false);
+    expect(receipts.save).not.toHaveBeenCalled();
+  });
+
+  it("inexistente -> NotFoundError; id mal formado -> BadRequestError", async () => {
     const { service, receipts } = setup();
     receipts.findById.mockResolvedValue(null);
-    await expect(service.approve("r")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.approve(rid, String(eventId))).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.approve("r", String(eventId))).rejects.toBeInstanceOf(BadRequestError);
   });
 });
 

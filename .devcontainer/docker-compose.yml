@@ -6,13 +6,29 @@ services:
     # Mantiene el container vivo; los comandos los corrés vos desde la terminal de VS Code
     command: sleep infinity
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     # Ojo: no seteamos DATABASE_URL acá. dotenv NO pisa variables ya definidas,
     # así que si la pusiéramos acá ignoraría la de tu .env.
 
   mongo:
     image: mongo:7
     restart: unless-stopped
+    # Replica set de un nodo: deleteEvent usa transacciones, que no funcionan en
+    # un Mongo standalone. El healthcheck inicializa el replica set la primera vez.
+    # Desde el host (Compass, puerto 27017) conectar con ?directConnection=true.
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      start_period: 10s
+      retries: 20
     volumes:
       - mongo-data:/data/db
 

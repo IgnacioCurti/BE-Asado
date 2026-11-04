@@ -69,7 +69,13 @@ describe("EventService lecturas", () => {
   it("getDetails inexistente -> NotFoundError", async () => {
     const { service, events } = setup();
     events.findByIdWithDetails.mockResolvedValue(null);
-    await expect(service.getDetails("e")).rejects.toEqual(new NotFoundError("The event with the given ID was not found."));
+    await expect(service.getDetails(String(id()))).rejects.toEqual(new NotFoundError("The event with the given ID was not found."));
+  });
+
+  it("getDetails con id mal formado -> BadRequestError sin consultar la base", async () => {
+    const { service, events } = setup();
+    await expect(service.getDetails("abc")).rejects.toEqual(new BadRequestError("Invalid ObjectID"));
+    expect(events.findByIdWithDetails).not.toHaveBeenCalled();
   });
 
   it("getTransfers sin recibos -> BadRequestError", async () => {

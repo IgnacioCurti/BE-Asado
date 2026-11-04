@@ -3,6 +3,7 @@ import {
   auth,
   sameUser,
   eventOrganizer,
+  eventViewer,
   shoppingDesigneeOrEventOrganizer,
 } from "../middleware/middleware.js";
 import { asyncHandler } from "../core/http/asyncHandler.js";
@@ -20,14 +21,21 @@ eventRouter.get(
   asyncHandler(eventController.listPublicAndPrivate)
 );
 
-eventRouter.get("/getEventById/:id", asyncHandler(eventController.getById));
+// Cualquier usuario logueado con el id (el link) ve el evento, también si es
+// privado: así se suma a un evento privado hasta que existan los grupos.
+eventRouter.get("/getEventById/:id", auth, asyncHandler(eventController.getById));
 
 eventRouter.get(
   "/getMembersAndReceiptsInfo/:event",
+  [auth, eventViewer],
   asyncHandler(eventController.getMembersAndReceiptsInfo)
 );
 
-eventRouter.get("/getMembersAmount/:event", asyncHandler(eventController.getMembersAmount));
+eventRouter.get(
+  "/getMembersAmount/:event",
+  [auth, eventViewer],
+  asyncHandler(eventController.getMembersAmount)
+);
 
 eventRouter.get(
   "/getMemberIndividualCost/:user/:event",

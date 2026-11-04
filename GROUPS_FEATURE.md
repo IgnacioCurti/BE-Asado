@@ -189,7 +189,7 @@ Qué queda en manos del organizer hoy y qué pasa si sale:
 
 #### 4.4.2 Autoasignación de roles
 
-✅ **`editRoles` solo permite que el usuario del JWT se asigne a sí mismo** como `chef` o `shoppingDesignee`. No se le pueden asignar roles a otro usuario. Esto reemplaza lo que proponía `WORKTODO.md` §2.2 ("solo organizer"), que ya quedó corregido allá.
+✅ **`editRoles` solo permite que el usuario del JWT se asigne a sí mismo** como `chef` o `shoppingDesignee`. (Implementado en la rama `t/groups`, junto con el chef ocupado y los roles congelados fuera de `available`; ver `FRONTEND_CHANGES.md` §22. El body se mantuvo como `{ chef, shoppingDesignee: [] }` y se acepta solo el cambio del propio usuario. Falta 9i y la liberación de roles al desuscribirse.) No se le pueden asignar roles a otro usuario. Esto reemplaza lo que proponía `WORKTODO.md` §2.2 ("solo organizer"), que ya quedó corregido allá.
 
 - El que se asigna tiene que ser miembro del evento (y por lo tanto del grupo). Así se resuelve también `WORKTODO.md` §5 ("`editRoles` permite asignar roles a no miembros").
 - Cambia el contrato: hoy el body trae `{ chef, shoppingDesignee: [] }` con IDs arbitrarios. Va a `FRONTEND_CHANGES.md`.
@@ -283,6 +283,16 @@ Middlewares nuevos, siguiendo el estilo de [src/middleware/middleware.ts](src/mi
 
 Ya figuran en `WORKTODO.md` §2.3: `getEventById`, `getMembersAndReceiptsInfo` y `getMembersAmount` responden sin `auth`. Con grupos dejan de ser algo "a revisar" y pasan a ser **requisito**: si siguen abiertos, cualquiera ve los eventos de cualquier grupo. Se resuelven con `auth` + `eventViewer`.
 
+✅ **Paso 1 hecho (rama `t/groups`), con una regla provisoria hasta que exista `Event.group`:**
+- Los tres exigen `auth`.
+- `getEventById` lo ve cualquier usuario logueado, también si el evento es privado, porque hoy el link es la única forma de sumarse a un evento privado (§1).
+- `getMembersAndReceiptsInfo` y `getMembersAmount` usan `eventViewer`: si el evento es público, cualquier logueado; si es privado, solo sus miembros.
+
+Pendiente para el paso 4, que vino de `TOFIX.md` (borrado):
+- `getEventById` pasa a `eventViewer`.
+- `eventViewer` pasa a "miembro del grupo **o** del evento". Hoy, en un evento público, cualquier logueado ve montos y CBU/alias.
+- `subscribeToAnEvent` valida la membresía en el grupo. Hoy cualquiera con el id se suma a un evento privado; es el flujo del link y no se puede cerrar antes de tener grupos.
+
 Otros endpoints a revisar:
 
 | Endpoint | Problema con grupos |
@@ -325,7 +335,7 @@ Para la opción B (4.3) se agrega: `acceptInvitation`.
 
 Cambios en los endpoints de eventos:
 
-- `createEvent`: requiere `group` en el body y valida que el usuario del JWT sea miembro del grupo. De paso, `organizer` pasa a tomarse del JWT en vez del body.
+- `createEvent`: requiere `group` en el body y valida que el usuario del JWT sea miembro del grupo. (`organizer` ya se toma del JWT: implementado en `t/groups`.)
 - `subscribeToAnEvent`: valida la membresía en el grupo.
 - `getEventById`, `getMembersAndReceiptsInfo`, `getMembersAmount`: pasan a usar `auth` + `eventViewer`.
 - `getPublicEvents`: se elimina. `getEvents` / `getPublicAndPrivateEvents`: ver 5.2.

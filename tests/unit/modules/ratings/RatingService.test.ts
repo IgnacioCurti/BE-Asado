@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import mongoose from "mongoose";
 import { RatingService } from "../../../../src/modules/ratings/RatingService.js";
-import { BadRequestError, NotFoundError } from "../../../../src/core/errors/AppError.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../../../../src/core/errors/AppError.js";
 
 const id = () => new mongoose.Types.ObjectId();
 
@@ -31,7 +31,7 @@ describe("RatingService.createOrUpdate", () => {
     const event = eventWith("finished", [user]);
     const { service, events, ratings } = setup(event);
 
-    const result = await service.createOrUpdate(String(event._id), String(user), 4);
+    const result = await service.createOrUpdate(String(event._id), String(user), String(user), 4);
 
     expect(ratings.create).toHaveBeenCalledWith({ score: 4, user: String(user) });
     expect(event.ratings).toEqual([result]);
@@ -44,7 +44,7 @@ describe("RatingService.createOrUpdate", () => {
     const event = eventWith("closed", [user], [existing]);
     const { service, events, ratings } = setup(event);
 
-    const result = await service.createOrUpdate(String(event._id), String(user), 5);
+    const result = await service.createOrUpdate(String(event._id), String(user), String(user), 5);
 
     expect(result).toBe(existing);
     expect(existing.score).toBe(5);
@@ -57,7 +57,7 @@ describe("RatingService.createOrUpdate", () => {
     const user = id();
     const { service, ratings } = setup(eventWith(state, [user]));
 
-    await expect(service.createOrUpdate(String(id()), String(user), 4)).rejects.toEqual(
+    await expect(service.createOrUpdate(String(id()), String(user), String(user), 4)).rejects.toEqual(
       new BadRequestError("The event is not closed or finished.")
     );
     expect(ratings.create).not.toHaveBeenCalled();
@@ -65,21 +65,38 @@ describe("RatingService.createOrUpdate", () => {
 
   it("evento inexistente lanza NotFoundError", async () => {
     const { service } = setup(null);
-    await expect(service.createOrUpdate(String(id()), String(id()), 4)).rejects.toBeInstanceOf(NotFoundError);
+    const user = String(id());
+    await expect(service.createOrUpdate(String(id()), user, user, 4)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("usuario que no es miembro lanza BadRequestError", async () => {
     const { service } = setup(eventWith("finished", [id()]));
-    await expect(service.createOrUpdate(String(id()), String(id()), 4)).rejects.toEqual(
+    const user = String(id());
+    await expect(service.createOrUpdate(String(id()), user, user, 4)).rejects.toEqual(
       new BadRequestError("The user with the given ID was not found in the event.")
     );
   });
 
-  it("id de usuario mal formado lanza un error que no es AppError (responde 500)", async () => {
-    const { service } = setup(eventWith("finished", [id()]));
-    const error = await service.createOrUpdate(String(id()), "abc", 4).catch((e) => e);
-    expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(BadRequestError);
+  it("id de usuario mal formado -> BadRequestError sin consultar la base", async () => {
+    const { service, events } = setup(eventWith("finished", [id()]));
+    await expect(service.createOrUpdate(String(id()), "abc", "abc", 4)).rejects.toEqual(new BadRequestError("Invalid ObjectID"));
+    expect(events.findByIdWithRatings).not.toHaveBeenCalled();
+  });
+
+  it("calificar en nombre de otro -> ForbiddenError", async () => {
+    const user = id();
+    const { service, ratings } = setup(eventWith("finished", [user]));
+    await expect(service.createOrUpdate(String(id()), String(user), String(id()), 4)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(ratings.create).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 6, 3.5, "x", undefined])("score %s -> BadRequestError", async (score) => {
+    const user = id();
+    const { service, ratings } = setup(eventWith("finished", [user]));
+    await expect(service.createOrUpdate(String(id()), String(user), String(user), score)).rejects.toEqual(
+      new BadRequestError("The score must be an integer between 1 and 5.")
+    );
+    expect(ratings.create).not.toHaveBeenCalled();
   });
 
   it("si falla la creación no guarda el evento", async () => {
@@ -88,7 +105,7 @@ describe("RatingService.createOrUpdate", () => {
     const { service, events, ratings } = setup(event);
     ratings.create.mockRejectedValue(new Error("validation failed"));
 
-    await expect(service.createOrUpdate(String(event._id), String(user), 9)).rejects.toThrow("validation failed");
+    await expect(service.createOrUpdate(String(event._id), String(user), String(user), 4)).rejects.toThrow("validation failed");
     expect(events.save).not.toHaveBeenCalled();
     expect(event.ratings).toEqual([]);
   });

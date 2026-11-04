@@ -1,15 +1,17 @@
 import { Request, Response } from "express";
 import { STATUS_CODES } from "../../constants/httpStatusCode.js";
+import { IRequestWithUser } from "../../models/interfaces.js";
 import { RatingService } from "./RatingService.js";
 
 export class RatingController {
   constructor(private readonly service: RatingService) {}
 
   // Arrow functions: conservan `this` al pasarse como handlers de Express.
-  create = async (req: Request, res: Response): Promise<Response> => {
+  create = async (req: IRequestWithUser, res: Response): Promise<Response> => {
     const rating = await this.service.createOrUpdate(
       req.params.event,
       req.params.user,
+      req.user._id,
       req.body.score
     );
     return res.status(STATUS_CODES.OK).json(rating);

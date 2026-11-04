@@ -1,22 +1,25 @@
 import mongoose from "mongoose";
-import { BadRequestError, ForbiddenError, NotFoundError } from "../../core/errors/AppError.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../../core/errors/AppError.js";
+import { isValidId } from "../../core/validation/isValidId.js";
 import {
   IEvent,
   IEventAmountCalculations,
   IEventPopulatedWithOptions,
   IEventWithPurchaseReceipts,
   IEventWithPurchaseReceiptsOptions,
-  IEventWithTransferReceiptsPurchaseReceiptsRatings,
   IMemberWhoHasUploaded,
   IPublicEvent,
   ITransferInfo,
 } from "../../models/interfaces.js";
-import { ImageService } from "../images/ImageService.js";
 import { ReminderScheduler } from "../notifications/ReminderScheduler.js";
 import { OptionRepository } from "../options/OptionRepository.js";
 import { PaymentCalculator } from "../payments/PaymentCalculator.js";
 import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRepository.js";
-import { RatingRepository } from "../ratings/RatingRepository.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
 import { UserRepository } from "../users/UserRepository.js";
@@ -24,25 +27,26 @@ import { EventMapper } from "./EventMapper.js";
 import { EventRepository } from "./EventRepository.js";
 
 export const eventNotFoundMessage: string = "The event with the given ID was not found.";
+const invalidObjectIdMessage: string = "Invalid ObjectID";
 
 const STATES_WITH_COSTS: string[] = ["finished", "readyforpayment"];
 const STATES_WITHOUT_UNSUBSCRIBE: string[] = ["closed", "readyforpayment"];
 const userNotFoundMessage: string = "The user with the given ID was not found.";
+const rolesFrozenMessage: string = "Roles can only change while the event is available.";
+const chefTakenMessage: string = "The event already has a chef.";
 
 // Al crear un evento, si hay más de MAX_PUBLIC_EVENTS públicos se borran los
-// terminados o cancelados más viejos (de cualquier privacidad).
+// públicos terminados o cancelados más viejos.
 const MAX_PUBLIC_EVENTS: number = 6;
 
-// Campos que un cliente puede enviar al crear un evento. El estado y las
-// colecciones relacionadas (recibos, ratings, opciones) las maneja el backend.
+// Campos que un cliente puede enviar al crear un evento. El estado, los roles y
+// las colecciones relacionadas (recibos, ratings, opciones) las maneja el
+// backend; el organizador sale del token.
 const CREATE_EVENT_FIELDS: string[] = [
   "title",
   "datetime",
   "description",
   "memberLimit",
-  "members",
-  "organizer",
-  "shoppingDesignee",
   "isPrivate",
   "penalization",
   "penalizationStartDate",
@@ -69,9 +73,11 @@ export interface EventEditInput {
   isPrivate?: boolean;
 }
 
+// Estado completo de los roles que manda el front. Solo se aceptan los cambios
+// que afectan al usuario del token (GROUPS_FEATURE.md §4.4.2).
 export interface EventRolesInput {
-  chef?: mongoose.Types.ObjectId | null;
-  shoppingDesignee: mongoose.Types.ObjectId[];
+  chef?: unknown;
+  shoppingDesignee?: unknown;
 }
 
 export interface EventServiceDeps {
@@ -89,17 +95,15 @@ export interface EventServiceDeps {
     | "findByIdWithReceiptsAndOptions"
     | "build"
     | "countPublic"
-    | "findEndedOldestFirst"
-    | "findByIdWithReceiptsAndRatings"
-    | "deleteById"
+    | "findPublicEndedOldestFirst"
+    | "deleteCascade"
+    | "updateRolesIfAllowed"
   >;
   paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
   users: Pick<UserRepository, "findById">;
-  purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save" | "deleteById">;
+  purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save">;
   options: Pick<OptionRepository, "save">;
-  transferReceipts: Pick<TransferReceiptRepository, "existsApprovedForEvent" | "deleteById">;
-  ratings: Pick<RatingRepository, "deleteById">;
-  images: Pick<ImageService, "delete">;
+  transferReceipts: Pick<TransferReceiptRepository, "existsApprovedForEvent">;
   reminders: Pick<ReminderScheduler, "syncWithEvent" | "cancelForEvent" | "scheduleNewEvent">;
   payments: Pick<PaymentCalculator, "transfersFor" | "memberCost">;
   mapper: EventMapper;
@@ -121,6 +125,7 @@ export class EventService {
   }
 
   async getDetails(id: string): Promise<IEventPopulatedWithOptions> {
+    if (!isValidId(id)) throw new BadRequestError(invalidObjectIdMessage);
     const event = await this.deps.events.findByIdWithDetails(id);
     if (!event) throw new NotFoundError(eventNotFoundMessage);
     return event;
@@ -208,12 +213,45 @@ export class EventService {
     return event;
   }
 
-  async editRoles(eventId: string, roles: EventRolesInput): Promise<IEvent> {
+  // Cada miembro toma o suelta solo sus propios roles, y solo con el evento
+  // disponible. El chef es uno solo: si está ocupado hay que esperar a que se libere.
+  async editRoles(eventId: string, requesterId: string, roles: EventRolesInput): Promise<IEvent> {
+    if (!isValidId(eventId)) throw new BadRequestError(invalidObjectIdMessage);
     const event: IEvent = await this.getEvent(eventId);
-    event.chef = roles.chef ? roles.chef : null;
-    event.shoppingDesignee = roles.shoppingDesignee;
-    await this.deps.events.save(event);
-    return event;
+    const nextChef: string | null = roles.chef ? String(roles.chef) : null;
+    const nextDesignees: string[] = this.parseIdList(roles.shoppingDesignee);
+    if ((nextChef && !isValidId(nextChef)) || !nextDesignees.every((id) => isValidId(id)))
+      throw new BadRequestError(invalidObjectIdMessage);
+    if (!event.members.some((member) => member.toString() === requesterId))
+      throw new ForbiddenError("Access denied. Only event members can take a role.");
+
+    const currentChef: string | null = event.chef ? String(event.chef) : null;
+    const currentDesignees: string[] = event.shoppingDesignee.map(String);
+    const added: string[] = nextDesignees.filter((id) => !currentDesignees.includes(id));
+    const removed: string[] = currentDesignees.filter((id) => !nextDesignees.includes(id));
+    const chefChanged: boolean = nextChef !== currentChef;
+    const touchesOthers: boolean =
+      [...added, ...removed].some((id) => id !== requesterId) ||
+      (chefChanged && nextChef !== requesterId && currentChef !== requesterId);
+    if (touchesOthers)
+      throw new ForbiddenError("Access denied. Users can only take or release their own roles.");
+    if (!chefChanged && added.length === 0 && removed.length === 0) return event;
+    if (event.state !== "available") throw new ConflictError(rolesFrozenMessage);
+    if (chefChanged && nextChef === requesterId && currentChef !== null)
+      throw new ConflictError(chefTakenMessage);
+
+    const me = new mongoose.Types.ObjectId(requesterId);
+    const updated: IEvent | null = await this.deps.events.updateRolesIfAllowed(event._id, {
+      chef: chefChanged ? { from: currentChef ? me : null, to: nextChef ? me : null } : undefined,
+      addDesignee: added.length > 0 ? me : undefined,
+      removeDesignee: removed.length > 0 ? me : undefined,
+    });
+    if (!updated) {
+      // Otro pedido cambió el evento en el medio (estado o chef).
+      const current: IEvent = await this.getEvent(eventId);
+      throw new ConflictError(current.state !== "available" ? rolesFrozenMessage : chefTakenMessage);
+    }
+    return updated;
   }
 
   // Reemplaza los datos editables del evento validando la transición de estado.
@@ -242,15 +280,28 @@ export class EventService {
     return event;
   }
 
-  // El organizador, los miembros y los designados vienen del body (ver TOFIX.md).
-  async create(body: Record<string, any>): Promise<IEvent> {
+  // El organizador es el usuario del token. Solo puede sumarse a sí mismo como
+  // miembro (members incluye su id), chef (isChef) o comprador (isShoppingDesignee).
+  async create(organizerId: string, body: Record<string, any>): Promise<IEvent> {
     const fields: Record<string, unknown> = Object.fromEntries(
       CREATE_EVENT_FIELDS.filter((field) => field in body).map((field) => [field, body[field]])
     );
-    const event: IEvent = this.deps.events.build(fields);
-    event.chef = body.isChef ? body.organizer : null;
-    if (body.isShoppingDesignee) event.shoppingDesignee.push(body.organizer);
-    await this.deps.events.save(event);
+    const organizer = new mongoose.Types.ObjectId(organizerId);
+    const joins: boolean =
+      Array.isArray(body.members) && body.members.some((id: unknown) => String(id) === organizerId);
+    const event: IEvent = this.deps.events.build({
+      ...fields,
+      organizer,
+      members: joins ? [organizer] : [],
+      chef: body.isChef ? organizer : null,
+      shoppingDesignee: body.isShoppingDesignee ? [organizer] : [],
+    });
+    try {
+      await this.deps.events.save(event);
+    } catch (error) {
+      if (error instanceof mongoose.Error.ValidationError) throw new BadRequestError(error.message);
+      throw error;
+    }
 
     await this.pruneEndedEvents();
     if (!event.isPrivate) await this.deps.reminders.scheduleNewEvent(event._id);
@@ -258,54 +309,31 @@ export class EventService {
     return event;
   }
 
-  // Borra el evento y todo lo que cuelga de él (sin transacción: un fallo a
-  // mitad puede dejar documentos huérfanos).
+  // Borra el evento y todo lo que cuelga de él, en una sola transacción.
   async delete(eventId: string): Promise<IEvent> {
     const event: IEvent = await this.getEvent(eventId);
-    await this.deleteRelatedDocuments(event._id);
-    await this.deps.reminders.cancelForEvent(event._id);
-    await this.deps.events.deleteById(eventId);
+    await this.deps.events.deleteCascade([event._id]);
     return event;
   }
 
   private async pruneEndedEvents(): Promise<void> {
     const totalPublic: number = await this.deps.events.countPublic();
     if (totalPublic <= MAX_PUBLIC_EVENTS) return;
-    const ended: IEvent[] = await this.deps.events.findEndedOldestFirst();
-    const toDelete: IEvent[] = ended.slice(0, Math.min(totalPublic - MAX_PUBLIC_EVENTS, ended.length));
-    for (const event of toDelete) {
-      await this.deps.reminders.cancelForEvent(event._id);
-      await this.deleteRelatedDocuments(event._id);
-      await this.deps.events.deleteById(String(event._id));
-    }
-  }
-
-  // Comprobantes de transferencia y de compra (con sus imágenes) y calificaciones.
-  private async deleteRelatedDocuments(eventId: mongoose.Types.ObjectId): Promise<void> {
-    const event: IEventWithTransferReceiptsPurchaseReceiptsRatings | null =
-      await this.deps.events.findByIdWithReceiptsAndRatings(eventId);
-
-    await Promise.all(
-      event!.transferReceipts.map(async (receipt) => {
-        if (receipt.image) await this.deps.images.delete(receipt.image);
-        await this.deps.transferReceipts.deleteById(String(receipt._id));
-      })
-    );
-    await Promise.all(
-      event!.purchaseReceipts.map(async (receipt) => {
-        if (receipt.image) await this.deps.images.delete(receipt.image);
-        await this.deps.purchaseReceipts.deleteById(String(receipt._id));
-      })
-    );
-    await Promise.all(
-      event!.ratings.map((rating) => this.deps.ratings.deleteById(String(rating._id)))
-    );
+    const ended: IEvent[] = await this.deps.events.findPublicEndedOldestFirst();
+    const toDelete: IEvent[] = ended.slice(0, totalPublic - MAX_PUBLIC_EVENTS);
+    await this.deps.events.deleteCascade(toDelete.map((event) => event._id));
   }
 
   private async getEvent(id: string): Promise<IEvent> {
     const event: IEvent | null = await this.deps.events.findById(id);
     if (!event) throw new NotFoundError(eventNotFoundMessage);
     return event;
+  }
+
+  private parseIdList(value: unknown): string[] {
+    if (value === undefined || value === null || value === "") return [];
+    if (!Array.isArray(value)) throw new BadRequestError("shoppingDesignee must be an array.");
+    return [...new Set(value.map(String))];
   }
 
   private cannotJoinMessage(event: IEvent, userId: mongoose.Types.ObjectId): string | null {

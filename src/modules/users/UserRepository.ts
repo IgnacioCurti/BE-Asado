@@ -15,8 +15,9 @@ export class UserRepository extends BaseRepository<IUser> {
     return this.model.findOne({ email }).exec();
   }
 
-  // Campos sensibles que nunca salen en las respuestas de usuarios.
-  private static readonly SAFE_PROJECTION: string =
+  // Campos sensibles que nunca salen en las respuestas de usuarios. También se
+  // usa al poblar usuarios desde otros documentos (eventos, comprobantes).
+  static readonly SAFE_PROJECTION: string =
     "-password -verificationCode -verificationCodeExpiresAt -verificationAttempts";
 
   findAllSafe(): Promise<ISafeUser[]> {

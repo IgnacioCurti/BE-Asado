@@ -68,8 +68,15 @@ export class TransferReceiptService {
     return event!.transferReceipts;
   }
 
-  getById(id: string): Promise<ITransferReceipt> {
-    return this.getReceipt(id);
+  // Lo ven los miembros del evento del comprobante (los designados lo necesitan
+  // para aprobarlo), igual que su imagen.
+  async getById(id: string, requesterId: string): Promise<ITransferReceipt> {
+    if (!isValidId(id)) throw new BadRequestError("Invalid ObjectID");
+    const receipt: ITransferReceipt = await this.getReceipt(id);
+    const event: IEvent | null = await this.events.findById(String(receipt.event));
+    if (!event?.members.some((member) => member.toString() === requesterId))
+      throw new ForbiddenError("Access denied. The user is not a participant of the event.");
+    return receipt;
   }
 
   // Solo el dueño puede adjuntar o reemplazar el archivo, y solo si no está aprobado.
@@ -158,8 +165,12 @@ export class TransferReceiptService {
   }
 
   // Al aprobar el último pago pendiente, el evento pasa a "finished".
-  async approve(receiptId: string): Promise<ITransferReceipt> {
+  // El comprobante tiene que ser del evento de la ruta (el middleware valida que
+  // el usuario sea designado de ese evento).
+  async approve(receiptId: string, eventId: string): Promise<ITransferReceipt> {
+    if (!isValidId(receiptId)) throw new BadRequestError("Invalid ObjectID");
     const receipt: ITransferReceipt = await this.getReceipt(receiptId);
+    if (String(receipt.event) !== eventId) throw new NotFoundError(receiptNotFoundMessage);
     if (receipt.hasPaid) throw new BadRequestError("The transfer receipt is already approved.");
     receipt.hasPaid = true;
     await this.receipts.save(receipt);
