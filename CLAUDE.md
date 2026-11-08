@@ -27,13 +27,13 @@ Verify commands against `package.json` before changing them.
 - Node/TypeScript: `.claude/node-typescript/SKILL.md`
 - MongoDB/Mongoose: `.claude/mongodb-mongoose/SKILL.md`
 - Testing: `.claude/testing/SKILL.md`
+- Git, commits, PRs y label `deploy-dev`: `.claude/git-conventions/SKILL.md`
 
 Inspect the actual repository structure before assuming file paths or architectural layers.
 ## Ramas y PRs
 - `main` es producción. Todos los PRs van contra `main` (nunca contra `dev`).
 - `dev` es una rama GENERADA por `.github/workflows/rebuild-dev.yml` (= main + PRs abiertos con label `deploy-dev`).
   Nunca commitear, pushear ni abrir PRs desde/hacia `dev`: se sobrescribe con force-push.
-- Si el cambio necesita probarse en ejemplo-dev.vercel.app (DB de dev), crear el PR con
-  `gh pr create --base main --fill --label deploy-dev`, o agregarlo luego con `gh pr edit --add-label deploy-dev`.
-- Para sacarlo de dev: `gh pr edit --remove-label deploy-dev`.
-- Ver qué está en dev: `gh pr list --label deploy-dev`.
+- Sin atribución de Claude en commits ni PRs (sin `Co-Authored-By: Claude`).
+- Antes de crear ramas, commitear o abrir PRs, leer `.claude/git-conventions/SKILL.md`
+  (convenciones de commits/ramas y uso del label `deploy-dev`).
