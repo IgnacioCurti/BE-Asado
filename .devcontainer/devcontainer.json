@@ -5,13 +5,17 @@
   "workspaceFolder": "/workspaces/BE-Asado",
   "shutdownAction": "stopCompose",
 
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
   "forwardPorts": [3600, 27017],
   "portsAttributes": {
     "3600": { "label": "API" },
     "27017": { "label": "MongoDB", "onAutoForward": "silent" }
   },
 
-  "postCreateCommand": "npm ci",
+  "postCreateCommand": "sudo chown -R node:node /home/node/.claude && npm ci",
 
   "customizations": {
     "vscode": {
@@ -21,7 +25,8 @@
         "mongodb.mongodb-vscode",
         "PKief.material-icon-theme",
         "eamodio.gitlens",
-        "formulahendry.auto-close-tag"
+        "formulahendry.auto-close-tag",
+        "Anthropic.claude-code"
       ]
     }
   },
