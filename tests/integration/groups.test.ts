@@ -1,13 +1,26 @@
 /**
- * Endpoints de grupos (GROUPS_FEATURE.md §4 a §6, paso 3 del plan).
- * Las reglas de salida que dependen de eventos (deudas, roles, baja de
- * eventos) llegan con Event.group en el paso 4.
+ * Endpoints de grupos (GROUPS_FEATURE.md §4 a §6). Las reglas de salida que
+ * dependen de los eventos del grupo (deudas, roles, baja de eventos, cascada)
+ * son del paso 4.
  */
 import { describe, expect, it } from "vitest";
 import { api, auth } from "../helpers/api.js";
 import {
+  countEvents,
   countGroups,
   countImages,
+  countOptions,
+  countPurchaseReceipts,
+  countReminders,
+  createEvent,
+  createOption,
+  createPurchaseReceipt,
+  createReminder,
+  createTransferReceipt,
+  findEvent,
+  findOption,
+  findPurchaseReceipt,
+  simulateDeleteFailure,
   createGroup,
   createImage,
   createUser,
@@ -286,6 +299,172 @@ describe("PUT /api/groups/leaveGroup/:group", () => {
   it("quien no es miembro -> 403", async () => {
     const { outsider, group } = await trio();
     expect((await api().put(`/api/groups/leaveGroup/${group._id}`).set(as(outsider))).status).toBe(403);
+  });
+});
+
+describe("PUT /api/groups/leaveGroup/:group con eventos del grupo (§4.4)", () => {
+  const leave = (group: { _id: string }, user: UserFixture) =>
+    api().put(`/api/groups/leaveGroup/${group._id}`).set(as(user));
+
+  it("sale de los eventos available (miembro, roles, votos y comprobantes) y sigue en los demás", async () => {
+    const { admin, member, group } = await trio();
+    const open = await createEvent({
+      organizer: admin._id,
+      group: group._id,
+      members: [admin._id, member._id],
+      chef: member._id,
+      shoppingDesignee: [admin._id, member._id],
+    });
+    const option = await createOption({ event: open._id, title: "Vacío", participants: [admin._id, member._id] });
+    const receipt = await createPurchaseReceipt({
+      event: open._id,
+      shoppingDesignee: admin._id,
+      amount: 100,
+      participants: [admin._id, member._id],
+    });
+    const closed = await createEvent({ organizer: admin._id, group: group._id, members: [admin._id, member._id], state: "closed" });
+    const finished = await createEvent({
+      organizer: admin._id,
+      group: group._id,
+      members: [admin._id, member._id],
+      shoppingDesignee: [member._id],
+      state: "finished",
+    });
+    const otherGroupEvent = await createEvent({ organizer: member._id, members: [member._id] });
+
+    const res = await leave(group, member);
+
+    expect(res.status).toBe(200);
+    expect(await findEvent(open._id)).toMatchObject({ members: [admin._id], chef: null, shoppingDesignee: [admin._id] });
+    expect((await findOption(option._id))!.participants).toEqual([admin._id]);
+    expect((await findPurchaseReceipt(receipt._id))!.participants).toEqual([admin._id]);
+    expect((await findEvent(closed._id))!.members).toEqual([admin._id, member._id]);
+    expect(await findEvent(finished._id)).toMatchObject({ members: [admin._id, member._id], shoppingDesignee: [member._id] });
+    expect((await findEvent(otherGroupEvent._id))!.members).toEqual([member._id]);
+  });
+
+  it("después de salir sigue viendo un evento terminado del que es miembro, pero no los demás del grupo", async () => {
+    const { admin, member, group } = await trio();
+    const finished = await createEvent({ organizer: admin._id, group: group._id, members: [admin._id, member._id], state: "finished" });
+    const notMine = await createEvent({ organizer: admin._id, group: group._id, members: [admin._id] });
+    await leave(group, member).expect(200);
+
+    expect((await api().get(`/api/events/getEventById/${finished._id}`).set(as(member))).status).toBe(200);
+    expect((await api().get(`/api/events/getEventById/${notMine._id}`).set(as(member))).status).toBe(403);
+    expect((await api().get(`/api/events/getGroupEvents/${group._id}`).set(as(member))).status).toBe(403);
+  });
+
+  it("con deuda en un evento readyforpayment del grupo -> 409 y no sale de nada", async () => {
+    const { admin, member, group } = await trio();
+    const event = await createEvent({
+      organizer: admin._id,
+      group: group._id,
+      members: [admin._id, member._id],
+      shoppingDesignee: [admin._id],
+      state: "readyforpayment",
+    });
+    await createPurchaseReceipt({ event: event._id, shoppingDesignee: admin._id, amount: 100, participants: [admin._id, member._id] });
+
+    const res = await leave(group, member);
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/pending payments/);
+    expect((await findGroup(group._id))!.members).toContain(member._id);
+  });
+
+  it("con el pago aprobado puede salir", async () => {
+    const { admin, member, group } = await trio();
+    const event = await createEvent({
+      organizer: admin._id,
+      group: group._id,
+      members: [admin._id, member._id],
+      shoppingDesignee: [admin._id],
+      state: "readyforpayment",
+    });
+    await createPurchaseReceipt({ event: event._id, shoppingDesignee: admin._id, amount: 100, participants: [admin._id, member._id] });
+    await createTransferReceipt({ event: event._id, user: member._id, receiver: admin._id, amount: 50, hasPaid: true });
+
+    expect((await leave(group, member)).status).toBe(200);
+    expect((await findEvent(event._id))!.members).toEqual([admin._id, member._id]);
+  });
+
+  it("una deuda en un evento de otro grupo no impide salir", async () => {
+    const { admin, member, group } = await trio();
+    const elsewhere = await createEvent({
+      organizer: admin._id,
+      members: [admin._id, member._id],
+      shoppingDesignee: [admin._id],
+      state: "readyforpayment",
+    });
+    await createPurchaseReceipt({ event: elsewhere._id, shoppingDesignee: admin._id, amount: 100, participants: [admin._id, member._id] });
+    expect((await leave(group, member)).status).toBe(200);
+  });
+
+  it.each([
+    ["chef", "closed", (u: string) => ({ chef: u })],
+    ["comprador", "closed", (u: string) => ({ shoppingDesignee: [u] })],
+    ["chef", "readyforpayment", (u: string) => ({ chef: u })],
+    ["comprador", "readyforpayment", (u: string) => ({ shoppingDesignee: [u] })],
+  ])("siendo %s de un evento %s del grupo -> 409 y no sale", async (_role, state, role) => {
+    const { admin, member, group } = await trio();
+    await createEvent({
+      organizer: admin._id,
+      group: group._id,
+      members: [admin._id, member._id],
+      shoppingDesignee: [admin._id],
+      state,
+      ...role(member._id),
+    });
+    const res = await leave(group, member);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/chef or a shopping designee/);
+    expect((await findGroup(group._id))!.members).toContain(member._id);
+  });
+
+  it("ser organizer de un evento activo no impide salir (§4.4.1)", async () => {
+    const { admin, member, group } = await trio();
+    const event = await createEvent({
+      organizer: member._id,
+      group: group._id,
+      members: [admin._id],
+      shoppingDesignee: [admin._id],
+      state: "closed",
+    });
+    expect((await leave(group, member)).status).toBe(200);
+    expect((await findEvent(event._id))!.organizer).toBe(member._id);
+  });
+
+  it("el último miembro sale: se borran los eventos del grupo con todo lo que cuelga, y no los de otros grupos", async () => {
+    const user = await createUser();
+    const group = await createGroup({ members: [user._id] });
+    const event = await createEvent({ organizer: user._id, group: group._id, state: "finished" });
+    await createOption({ event: event._id, title: "Vacío" });
+    await createPurchaseReceipt({ event: event._id, shoppingDesignee: user._id, amount: 10, participants: [user._id] });
+    await createReminder({ event: event._id, datetime: new Date("2030-01-01T00:00:00Z"), type: "eventStart" });
+    const other = await createEvent({ organizer: user._id });
+
+    const res = await leave(group, user);
+
+    expect(res.body.groupDeleted).toBe(true);
+    expect(await findEvent(event._id)).toBeNull();
+    expect(await findEvent(other._id)).not.toBeNull();
+    expect(await countEvents()).toBe(1);
+    expect(await countOptions()).toBe(0);
+    expect(await countPurchaseReceipts()).toBe(0);
+    expect(await countReminders()).toBe(0);
+  });
+
+  it("si el borrado en cascada falla, no se borra nada (ni el grupo ni sus eventos)", async () => {
+    const user = await createUser();
+    const group = await createGroup({ members: [user._id] });
+    const event = await createEvent({ organizer: user._id, group: group._id, state: "finished" });
+    await createOption({ event: event._id, title: "Vacío" });
+    simulateDeleteFailure("Option", "falla simulada");
+
+    expect((await leave(group, user)).status).toBe(500);
+    expect(await findGroup(group._id)).not.toBeNull();
+    expect(await findEvent(event._id)).not.toBeNull();
+    expect(await countOptions()).toBe(1);
   });
 });
 

@@ -5,14 +5,23 @@ import {
   ForbiddenError,
   NotFoundError,
 } from "../../core/errors/AppError.js";
+import { runInTransaction, TransactionRunner } from "../../core/repositories/transaction.js";
 import { isValidId } from "../../core/validation/isValidId.js";
 import { GROUP_LIMITS } from "../../models/group.js";
-import { IGroup } from "../../models/interfaces.js";
+import { IEvent, IGroup } from "../../models/interfaces.js";
+import { EventRepository } from "../events/EventRepository.js";
+import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
 import { groupNotFoundMessage } from "./GroupAccessPolicy.js";
 import { isValidGroupCode, normalizeGroupCode } from "./groupCode.js";
 import { GroupRepository, IGroupWithMembers } from "./GroupRepository.js";
 
 const groupLimitMessage: string = `A user can belong to at most ${GROUP_LIMITS.MAX_GROUPS_PER_USER} groups.`;
+const onlyAdminMessage: string =
+  "The only admin can't leave the group while it has other members. Make another member an admin first.";
+const pendingDebtMessage: string =
+  "The user has pending payments in events of the group. Settle them before leaving.";
+const activeRoleMessage: string =
+  "The user is the chef or a shopping designee of a closed or ready-for-payment event of the group. Wait until the event ends or is reopened and release the role before leaving.";
 
 export interface GroupSummary {
   _id: mongoose.Types.ObjectId;
@@ -42,11 +51,24 @@ export type GroupServiceDeps = Pick<
   | "deleteIfOnlyMember"
 >;
 
+// Lo que necesita "salir del grupo" de los eventos del grupo (§4.4 y §4.6).
+export interface GroupEventsDeps {
+  events: Pick<
+    EventRepository,
+    "findActiveInGroupInvolving" | "removeUserFromAvailableInGroup" | "findIdsByGroup" | "deleteCascade"
+  >;
+  debtors: Pick<TransferReceiptService, "getDebtors">;
+  transaction: TransactionRunner;
+}
+
 // Grupos de usuarios (GROUPS_FEATURE.md). Quién es miembro o admin lo validan
 // los middlewares groupMember y groupAdmin; acá van las reglas de negocio.
 // Los admins y miembros salen siempre del token, nunca del body.
 export class GroupService {
-  constructor(private readonly groups: GroupServiceDeps) {}
+  constructor(
+    private readonly groups: GroupServiceDeps,
+    private readonly groupEvents: GroupEventsDeps
+  ) {}
 
   async create(userId: string, name: unknown): Promise<IGroup> {
     const cleanName: string = this.parseName(name);
@@ -97,21 +119,38 @@ export class GroupService {
     return this.getDetails(String(joined._id));
   }
 
-  // Salir del grupo (§4.4). El único admin no puede irse si quedan otros
-  // miembros; si es el último miembro, el grupo se borra (§4.6).
-  // TODO(paso 4, Event.group): bloquear por deudas o roles en eventos
-  // closed/readyforpayment del grupo, dar de baja de los available y borrar
-  // los eventos del grupo en la cascada.
+  // Salir del grupo (§4.4), en este orden:
+  // - el único admin no puede irse si quedan otros miembros;
+  // - no puede irse con deudas en eventos readyforpayment del grupo, ni siendo
+  //   chef o designado de un evento closed/readyforpayment del grupo;
+  // - sale de los eventos available del grupo (con sus roles, votos y
+  //   comprobantes) y sigue en los demás (historial);
+  // - si es el último miembro, el grupo se borra con sus eventos (§4.6).
+  // La baja del grupo y de sus eventos es una sola transacción.
   async leave(groupId: string, userId: string): Promise<LeaveResult> {
     const group: IGroup = await this.getGroup(groupId);
     const user = new mongoose.Types.ObjectId(userId);
     if (!group.members.some((member) => user.equals(member)))
       throw new ForbiddenError("Access denied. The user is not a member of the group.");
+    if (group.members.length > 1 && this.isOnlyAdmin(group, user))
+      throw new ConflictError(onlyAdminMessage);
+    await this.assertCanLeaveEvents(group._id, user);
 
+    const { events, transaction } = this.groupEvents;
     if (group.members.length === 1) {
-      if (await this.groups.deleteIfOnlyMember(group._id, user)) return { groupDeleted: true };
-    } else if (await this.groups.removeMemberKeepingAnAdmin(group._id, user)) {
-      return { groupDeleted: false };
+      const deleted: boolean = await transaction(async (session) => {
+        if (!(await this.groups.deleteIfOnlyMember(group._id, user, session))) return false;
+        await events.deleteCascade(await events.findIdsByGroup(group._id, session), session);
+        return true;
+      });
+      if (deleted) return { groupDeleted: true };
+    } else {
+      const left: boolean = await transaction(async (session) => {
+        if (!(await this.groups.removeMemberKeepingAnAdmin(group._id, user, session))) return false;
+        await events.removeUserFromAvailableInGroup(group._id, user, session);
+        return true;
+      });
+      if (left) return { groupDeleted: false };
     }
 
     // No se pudo escribir: o es el único admin, o el grupo cambió en el medio.
@@ -120,10 +159,27 @@ export class GroupService {
     if (!current.members.some((member) => user.equals(member)))
       throw new ForbiddenError("Access denied. The user is not a member of the group.");
     if (this.isOnlyAdmin(current, user) && current.members.length > 1)
-      throw new ConflictError(
-        "The only admin can't leave the group while it has other members. Make another member an admin first."
-      );
+      throw new ConflictError(onlyAdminMessage);
     throw new ConflictError("The group changed while leaving. Try again.");
+  }
+
+  // Deudas y roles en los eventos activos del grupo (§4.4). Las deudas se
+  // revisan primero: son lo que el usuario tiene que resolver por su cuenta.
+  private async assertCanLeaveEvents(
+    groupId: mongoose.Types.ObjectId,
+    user: mongoose.Types.ObjectId
+  ): Promise<void> {
+    const active: IEvent[] = await this.groupEvents.events.findActiveInGroupInvolving(groupId, user);
+    for (const event of active) {
+      if (event.state !== "readyforpayment" || !event.members.some((m) => user.equals(m))) continue;
+      const debtors = await this.groupEvents.debtors.getDebtors(event._id);
+      if (debtors.some((debtor) => user.equals(debtor._id)))
+        throw new ConflictError(pendingDebtMessage);
+    }
+    const hasRole = (event: IEvent): boolean =>
+      (event.chef != null && user.equals(event.chef)) ||
+      (event.shoppingDesignee ?? []).some((designee) => user.equals(designee));
+    if (active.some(hasRole)) throw new ConflictError(activeRoleMessage);
   }
 
   async rename(groupId: string, name: unknown): Promise<IGroup> {

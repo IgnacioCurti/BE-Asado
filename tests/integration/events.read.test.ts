@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { api, auth } from "../helpers/api.js";
 import {
+  addGroupMembers,
   createEvent,
+  createGroup,
   createOption,
   createPurchaseReceipt,
   createRating,
@@ -9,6 +11,7 @@ import {
   createUser,
   insertRawEvent,
   newId,
+  removeGroupMember,
 } from "../helpers/fixtures.js";
 
 const PUBLIC_EVENT_KEYS = [
@@ -65,6 +68,46 @@ describe("GET /api/events/getEvents", () => {
     const user = await createUser();
     const res = await api().get("/api/events/getEvents").set(auth(user.token));
     expect(res.body).toEqual([]);
+  });
+});
+
+describe("GET /api/events/getGroupEvents/:group", () => {
+  it("devuelve solo los eventos del grupo, ordenados por fecha descendente, sin poblar", async () => {
+    const me = await createUser();
+    const other = await createUser();
+    const group = await createGroup({ members: [me._id, other._id] });
+    const old = await createEvent({ organizer: other._id, group: group._id, members: [], datetime: "2029-01-01T00:00:00Z" });
+    const priv = await createEvent({ organizer: other._id, group: group._id, members: [], isPrivate: true, datetime: "2031-01-01T00:00:00Z" });
+    await createEvent({ organizer: me._id, title: "de otro grupo" });
+
+    const res = await api().get(`/api/events/getGroupEvents/${group._id}`).set(auth(me.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((e: any) => e._id)).toEqual([priv._id, old._id]);
+    expect(res.body[0]).toMatchObject({ group: group._id, organizer: other._id, members: [] });
+  });
+
+  it("grupo sin eventos -> []", async () => {
+    const me = await createUser();
+    const group = await createGroup({ members: [me._id] });
+    const res = await api().get(`/api/events/getGroupEvents/${group._id}`).set(auth(me.token));
+    expect(res.body).toEqual([]);
+  });
+
+  it("quien no es miembro del grupo -> 403", async () => {
+    const me = await createUser();
+    const other = await createUser();
+    const group = await createGroup({ members: [other._id] });
+    await createEvent({ organizer: other._id, group: group._id });
+    const res = await api().get(`/api/events/getGroupEvents/${group._id}`).set(auth(me.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("sin token -> 401; id mal formado -> 400; inexistente -> 404", async () => {
+    const me = await createUser();
+    expect((await api().get(`/api/events/getGroupEvents/${newId()}`)).status).toBe(401);
+    expect((await api().get("/api/events/getGroupEvents/abc").set(auth(me.token))).status).toBe(400);
+    expect((await api().get(`/api/events/getGroupEvents/${newId()}`).set(auth(me.token))).status).toBe(404);
   });
 });
 
@@ -274,28 +317,32 @@ describe("GET /api/events/getEventById/:id", () => {
     expect(res.body.chef).toBeNull();
   });
 
-  it("evento público: lo ve cualquier usuario autenticado aunque no sea miembro", async () => {
+  it("lo ve un miembro del grupo que no es miembro del evento", async () => {
     const organizer = await createUser();
-    const stranger = await createUser();
+    const groupMate = await createUser();
     const event = await createEvent({ organizer: organizer._id });
-    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
+    await addGroupMembers(event.group, [groupMate._id]);
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(groupMate.token));
     expect(res.status).toBe(200);
     expect(res.body._id).toBe(event._id);
   });
 
-  it("evento privado: lo ve cualquier usuario autenticado con el id (link para sumarse)", async () => {
+  it("lo sigue viendo un miembro del evento que salió del grupo", async () => {
     const organizer = await createUser();
-    const stranger = await createUser();
-    const event = await createEvent({ organizer: organizer._id, isPrivate: true });
-    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
+    const member = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id, member._id], state: "finished" });
+    await removeGroupMember(event.group, member._id);
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(member.token));
     expect(res.status).toBe(200);
   });
 
-  it("evento privado: un miembro lo ve", async () => {
+  it("quien no es del grupo ni del evento -> 403, aunque el evento no sea privado", async () => {
     const organizer = await createUser();
-    const event = await createEvent({ organizer: organizer._id, isPrivate: true });
-    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(organizer.token));
-    expect(res.status).toBe(200);
+    const stranger = await createUser();
+    const event = await createEvent({ organizer: organizer._id, isPrivate: false });
+    const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "Access denied. The user is not a member of the event's group." });
   });
 
   it("sin token -> 401", async () => {
@@ -308,7 +355,7 @@ describe("GET /api/events/getEventById/:id", () => {
     const me = await createUser();
     const res = await api().get(`/api/events/getEventById/${newId()}`).set(auth(me.token));
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ message: "The event with the given ID was not found." });
+    expect(res.body).toEqual({ message: "The event with the given ID does not exist." });
   });
 
   it("id mal formado -> 400", async () => {
@@ -368,10 +415,10 @@ describe("GET /api/events/getMembersAndReceiptsInfo/:event", () => {
     expect((await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`)).status).toBe(401);
   });
 
-  it("evento privado: un no miembro recibe 403", async () => {
+  it("quien no es del grupo ni del evento recibe 403", async () => {
     const ana = await createUser();
     const stranger = await createUser();
-    const event = await createEvent({ organizer: ana._id, isPrivate: true });
+    const event = await createEvent({ organizer: ana._id });
     const res = await api().get(`/api/events/getMembersAndReceiptsInfo/${event._id}`).set(auth(stranger.token));
     expect(res.status).toBe(403);
   });
@@ -453,10 +500,10 @@ describe("GET /api/events/getMembersAmount/:event", () => {
     expect((await api().get(`/api/events/getMembersAmount/${event._id}`)).status).toBe(401);
   });
 
-  it("evento privado: un no miembro recibe 403", async () => {
+  it("quien no es del grupo ni del evento recibe 403", async () => {
     const ana = await createUser();
     const stranger = await createUser();
-    const event = await createEvent({ organizer: ana._id, isPrivate: true });
+    const event = await createEvent({ organizer: ana._id });
     await createPurchaseReceipt({ event: event._id, shoppingDesignee: ana._id, amount: 50, participants: [ana._id] });
     const res = await api().get(`/api/events/getMembersAmount/${event._id}`).set(auth(stranger.token));
     expect(res.status).toBe(403);

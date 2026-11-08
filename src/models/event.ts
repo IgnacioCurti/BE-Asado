@@ -2,6 +2,16 @@ import mongoose from "mongoose";
 import { IEvent } from "./interfaces.js";
 
 const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
+  // Grupo dueño del evento (GROUPS_FEATURE.md §3.3): se fija al crearlo y no se
+  // mueve a otro grupo. Indexado para listar los eventos de un grupo.
+  group: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Group",
+    required: true,
+    immutable: true,
+    index: true,
+  },
+
   title: { type: String, required: true },
 
   datetime: { type: Date, required: true },

@@ -144,6 +144,7 @@ export interface IGroup extends Document {
 
 export interface IEvent extends Document {
   _id: mongoose.Types.ObjectId;
+  group: mongoose.Types.ObjectId;
   description?: string;
   title: string;
   datetime: Date;
