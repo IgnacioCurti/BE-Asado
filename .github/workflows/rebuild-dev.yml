@@ -7,10 +7,6 @@ on:
     types: [labeled, unlabeled, synchronize, reopened, closed]
   workflow_dispatch:
 
-concurrency:
-  group: rebuild-dev
-  cancel-in-progress: true
-
 permissions:
   contents: write
   pull-requests: read
@@ -22,8 +18,12 @@ jobs:
       github.event.action == 'unlabeled' ||
       contains(github.event.pull_request.labels.*.name, 'deploy-dev')
     runs-on: ubuntu-latest
+    # A nivel job (no workflow): los runs salteados por el `if` no cancelan rebuilds en curso
+    concurrency:
+      group: rebuild-dev
+      cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
