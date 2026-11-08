@@ -38,10 +38,6 @@ const rolesFrozenMessage: string = "Roles can only change while the event is ava
 const chefTakenMessage: string = "The event already has a chef.";
 const notGroupMemberMessage: string = "Access denied. The user is not a member of the event's group.";
 
-// Al crear un evento, si hay más de MAX_PUBLIC_EVENTS públicos se borran los
-// públicos terminados o cancelados más viejos.
-const MAX_PUBLIC_EVENTS: number = 6;
-
 // Campos que un cliente puede enviar al crear un evento. El estado, los roles y
 // las colecciones relacionadas (recibos, ratings, opciones) las maneja el
 // backend; el organizador sale del token.
@@ -97,8 +93,6 @@ export interface EventServiceDeps {
     | "addMemberIfAllowed"
     | "findByIdWithReceiptsAndOptions"
     | "build"
-    | "countPublic"
-    | "findPublicEndedOldestFirst"
     | "deleteCascade"
     | "updateRolesIfAllowed"
     | "findByGroup"
@@ -329,8 +323,8 @@ export class EventService {
       throw error;
     }
 
-    await this.pruneEndedEvents();
-    if (!event.isPrivate) await this.deps.reminders.scheduleNewEvent(event._id);
+    // El aviso de evento nuevo va a los miembros del grupo (ver NotificationService).
+    await this.deps.reminders.scheduleNewEvent(event._id);
     await this.deps.reminders.syncWithEvent(event);
     return event;
   }
@@ -340,14 +334,6 @@ export class EventService {
     const event: IEvent = await this.getEvent(eventId);
     await this.deps.events.deleteCascade([event._id]);
     return event;
-  }
-
-  private async pruneEndedEvents(): Promise<void> {
-    const totalPublic: number = await this.deps.events.countPublic();
-    if (totalPublic <= MAX_PUBLIC_EVENTS) return;
-    const ended: IEvent[] = await this.deps.events.findPublicEndedOldestFirst();
-    const toDelete: IEvent[] = ended.slice(0, totalPublic - MAX_PUBLIC_EVENTS);
-    await this.deps.events.deleteCascade(toDelete.map((event) => event._id));
   }
 
   private async parseGroupForNewEvent(

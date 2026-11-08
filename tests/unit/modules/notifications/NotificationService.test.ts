@@ -9,15 +9,26 @@ function user(name: string, notifications: Record<string, boolean> = {}) {
   return { name, email: `${name.toLowerCase()}@test.com`, notifications };
 }
 
+const organizer = id();
+const member = id();
+const GROUP = { name: "Amigos", members: [organizer, member] };
+const activeEvent = (fields: Record<string, unknown> = {}) => ({
+  state: "available",
+  group: id(),
+  organizer,
+  ...fields,
+});
+
 function setup() {
   const deps = {
     events: { findById: vi.fn(), findByIdWithMembers: vi.fn() },
-    users: { findWithNotificationEnabled: vi.fn().mockResolvedValue([]) },
+    groups: { findById: vi.fn().mockResolvedValue(GROUP) },
+    users: { findByIdsWithNotificationEnabled: vi.fn().mockResolvedValue([]) },
     reminders: { findDue: vi.fn().mockResolvedValue([]), deleteById: vi.fn() },
     debtors: { getDebtors: vi.fn().mockResolvedValue([]) },
     sendEmail: vi.fn().mockResolvedValue(undefined),
     templates: {
-      newEvent: (e: string) => `new ${e}`,
+      newEvent: (e: string, g: string) => `new ${e} ${g}`,
       eventStart: (e: string) => `start ${e}`,
       penalizationStart: (e: string, p: number) => `pen ${e} ${p}`,
       penalizationOneWeek: (e: string, p: number) => `week ${e} ${p}`,
@@ -37,25 +48,42 @@ describe("NotificationService.processDueReminders", () => {
       { _id: id(), event: eventId, type: "desconocido" },
     ];
     reminders.findDue.mockResolvedValue(due);
-    events.findById.mockResolvedValue({ isPrivate: false, state: "available" });
-    users.findWithNotificationEnabled.mockResolvedValue([user("Ana")]);
+    events.findById.mockResolvedValue(activeEvent());
+    users.findByIdsWithNotificationEnabled.mockResolvedValue([user("Ana")]);
 
     expect(await service.processDueReminders()).toBe(due);
 
     expect(reminders.findDue).toHaveBeenCalledWith(NOW);
-    expect(sendEmail).toHaveBeenCalledWith("ana@test.com", "FoodSpot | Nuevo evento", "Ana", `new ${eventId}`);
+    expect(sendEmail).toHaveBeenCalledWith("ana@test.com", "FoodSpot | Nuevo evento", "Ana", `new ${eventId} Amigos`);
     expect(reminders.deleteById.mock.calls).toEqual([[String(due[0]._id)], [String(due[1]._id)]]);
   });
 });
 
 describe("NotificationService.notifyNewEvent", () => {
-  it.each([
-    ["privado", { isPrivate: true, state: "available" }],
-    ["cancelado", { isPrivate: false, state: "cancelled" }],
-  ])("evento %s: no manda mails", async (_label, event) => {
+  it("evento cancelado: no manda mails", async () => {
     const { service, events, sendEmail } = setup();
-    events.findById.mockResolvedValue(event);
+    events.findById.mockResolvedValue(activeEvent({ state: "cancelled" }));
     await service.notifyNewEvent("e");
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("busca a los miembros del grupo del evento, sin el organizador, con el aviso activado", async () => {
+    const { service, events, groups, users, sendEmail } = setup();
+    const event = activeEvent();
+    events.findById.mockResolvedValue(event);
+    users.findByIdsWithNotificationEnabled.mockResolvedValue([user("Ana")]);
+    await service.notifyNewEvent("e");
+    expect(groups.findById).toHaveBeenCalledWith(String(event.group));
+    expect(users.findByIdsWithNotificationEnabled).toHaveBeenCalledWith([member], "newEvent");
+    expect(sendEmail).toHaveBeenCalledWith("ana@test.com", "FoodSpot | Nuevo evento", "Ana", "new e Amigos");
+  });
+
+  it("si el organizador es el único miembro, no busca usuarios", async () => {
+    const { service, events, groups, users, sendEmail } = setup();
+    events.findById.mockResolvedValue(activeEvent());
+    groups.findById.mockResolvedValue({ name: "Solo", members: [organizer] });
+    await service.notifyNewEvent("e");
+    expect(users.findByIdsWithNotificationEnabled).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
@@ -66,10 +94,20 @@ describe("NotificationService.notifyNewEvent", () => {
     expect(console.log).toHaveBeenCalledWith("Event with ID e not found.");
   });
 
+  it("grupo inexistente: registra el error sin lanzar", async () => {
+    const { service, events, groups, sendEmail } = setup();
+    const event = activeEvent();
+    events.findById.mockResolvedValue(event);
+    groups.findById.mockResolvedValue(null);
+    await expect(service.notifyNewEvent("e")).resolves.toBeUndefined();
+    expect(console.log).toHaveBeenCalledWith(`Group with ID ${event.group} not found.`);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("si falla un mail, sigue con el resto", async () => {
     const { service, events, users, sendEmail } = setup();
-    events.findById.mockResolvedValue({ isPrivate: false, state: "available" });
-    users.findWithNotificationEnabled.mockResolvedValue([user("Ana"), user("Beto")]);
+    events.findById.mockResolvedValue(activeEvent());
+    users.findByIdsWithNotificationEnabled.mockResolvedValue([user("Ana"), user("Beto")]);
     sendEmail.mockRejectedValueOnce(new Error("brevo down"));
     await service.notifyNewEvent("e");
     expect(sendEmail).toHaveBeenCalledTimes(2);

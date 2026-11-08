@@ -6,6 +6,7 @@ import {
   penalizationStartTemplate,
 } from "../../utils/templates.js";
 import { EventRepository } from "../events/EventRepository.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { transferReceiptService } from "../transferReceipts/index.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { NotificationController } from "./NotificationController.js";
@@ -14,6 +15,7 @@ import { ReminderRepository } from "./ReminderRepository.js";
 
 const notificationService = new NotificationService({
   events: new EventRepository(),
+  groups: new GroupRepository(),
   users: new UserRepository(),
   reminders: new ReminderRepository(),
   debtors: transferReceiptService,

@@ -266,19 +266,6 @@ export class EventRepository extends BaseRepository<IEvent> {
     return new this.model(fields);
   }
 
-  countPublic(): Promise<number> {
-    return this.model.countDocuments({ isPrivate: { $ne: true } }).exec();
-  }
-
-  // Mismo criterio de "público" que countPublic, para que la limpieza solo
-  // borre eventos que cuentan para el límite.
-  findPublicEndedOldestFirst(): Promise<IEvent[]> {
-    return this.model
-      .find({ isPrivate: { $ne: true }, state: { $in: ["finished", "cancelled"] } })
-      .sort({ datetime: "asc" })
-      .exec();
-  }
-
   // Borra los eventos con todo lo que cuelga de ellos (comprobantes y sus
   // imágenes, calificaciones, opciones y recordatorios) en una transacción:
   // o se borra todo o no se borra nada. Con `session` se suma a una

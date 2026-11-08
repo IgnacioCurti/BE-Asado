@@ -27,8 +27,27 @@ describe("passwordRecoveryTemplate", () => {
   });
 });
 
+describe("newEventTemplate", () => {
+  it("incluye el link al evento, el nombre del grupo, el título y el logo", () => {
+    const html = newEventTemplate(EVENT_ID, "Amigos");
+    expect(html).toContain(`href="${EVENT_URL}"`);
+    expect(html).toContain("<strong>Amigos</strong>");
+    expect(html).toContain("FoodSpot | Nuevo Evento");
+    expect(html).toContain(`src="${DEFAULT_LOGO}"`);
+  });
+
+  it("escapa el nombre del grupo", () => {
+    const html = newEventTemplate(EVENT_ID, `<img src=x onerror="a()">&'`);
+    expect(html).toContain("&lt;img src=x onerror=&quot;a()&quot;&gt;&amp;&#39;");
+    expect(html).not.toContain("<img src=x");
+  });
+
+  it("permite reemplazar el logo", () => {
+    expect(newEventTemplate(EVENT_ID, "g", "https://cdn.test/l.png")).toContain('src="https://cdn.test/l.png"');
+  });
+});
+
 describe.each([
-  ["newEventTemplate", newEventTemplate, "FoodSpot | Nuevo Evento"],
   ["eventStartTemplate", eventStartTemplate, "FoodSpot | El evento está a punto de comenzar"],
 ] as const)("%s", (_name, template, heading) => {
   it("incluye el link al evento, el título y el logo", () => {

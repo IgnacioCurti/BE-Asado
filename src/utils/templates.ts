@@ -41,8 +41,19 @@ export function passwordRecoveryTemplate(
   `;
 }
 
+// Para insertar texto de usuarios (p. ej. el nombre del grupo) en el HTML del mail.
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function newEventTemplate(
   eventId: string,
+  groupName: string,
   footerImageUrl: string = "https://i.ibb.co/Zz37kZxZ/logo-rojo.png"
 ): string {
   return `
@@ -58,7 +69,7 @@ export function newEventTemplate(
     <body>
       <div class="header"><h1>FoodSpot | Nuevo Evento</h1></div>
       <div class="content">
-        <p>Se ha creado un nuevo evento. Haz clic a continuación para unirte:</p>
+        <p>Se ha creado un nuevo evento en el grupo <strong>${escapeHtml(groupName)}</strong>. Haz clic a continuación para unirte:</p>
         <a style="color: #FFFFFF !important;" class="button" href="https://food-spot.vercel.app/event/${eventId}">Ver Evento</a>
       </div>
       <div style="

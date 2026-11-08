@@ -19,7 +19,6 @@ import {
   createTransferReceipt,
   createUser,
   findEvent,
-  findEventByTitle,
   findOption,
   findPurchaseReceipt,
   findReminders,
@@ -256,17 +255,16 @@ describe("POST /api/events/createEvent", () => {
   describe("recordatorios", () => {
     it("crea un recordatorio eventStart 30 minutos antes del evento", async () => {
       const organizer = await createUser();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
-      const reminders = await findReminders(res.body._id);
-      expect(reminders).toEqual([
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      expect((await remindersByType(res.body._id)).eventStart).toEqual([
         expect.objectContaining({ type: "eventStart", datetime: "2030-01-10T20:30:00.000Z", event: res.body._id }),
       ]);
     });
 
-    it("un evento público crea además un recordatorio newEvent con fecha = ahora - 3 horas", async () => {
+    it("crea siempre un recordatorio newEvent con fecha = ahora - 3 horas, también si el evento es privado", async () => {
       const organizer = await createUser();
       const before = Date.now();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
       const after = Date.now();
       const newEvent = (await remindersByType(res.body._id)).newEvent;
       expect(newEvent).toHaveLength(1);
@@ -303,49 +301,75 @@ describe("POST /api/events/createEvent", () => {
   });
 
   describe("notificación de nuevo evento", () => {
+    // Grupo con el organizador y los usuarios dados; devuelve el body del evento.
+    async function groupEventBody(organizer: UserFixture, others: UserFixture[], overrides: Record<string, unknown> = {}) {
+      const group = await createGroup({ name: "Amigos", members: [organizer._id, ...others.map((u) => u._id)] });
+      return eventBody(organizer, { group: group._id, ...overrides });
+    }
+
     it("crear el evento no manda mails: los manda el siguiente reminderCheck", async () => {
       const organizer = await createUser();
-      await createUser({ notifications: { newEvent: true } as any });
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      const member = await createUser({ notifications: { newEvent: true } as any });
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await groupEventBody(organizer, [member]));
       expect(res.status).toBe(201);
       expect(sentEmails).toHaveLength(0);
     });
 
-    it("un evento público notifica por mail a los usuarios con notifications.newEvent", async () => {
-      const organizer = await createUser();
+    it("notifica solo a los miembros del grupo con notifications.newEvent, sin el organizador", async () => {
+      const organizer = await createUser({ notifications: { newEvent: true } as any });
       const wantsIt = await createUser({ name: "Quiere", notifications: { newEvent: true } as any });
       const other = await createUser({ name: "Otro", notifications: { newEvent: true } as any });
-      await createUser({ notifications: { newEvent: false } as any });
+      const muted = await createUser({ notifications: { newEvent: false } as any });
+      await createUser({ name: "Ajeno", notifications: { newEvent: true } as any });
 
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      const res = await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await groupEventBody(organizer, [wantsIt, other, muted]));
       await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
-      expect(sentEmails.map((m) => m.payload.to[0])).toEqual([
-        { email: wantsIt.email, name: "Quiere" },
+      expect(sentEmails.map((m) => m.payload.to[0]).sort((a, b) => a.name.localeCompare(b.name))).toEqual([
         { email: other.email, name: "Otro" },
+        { email: wantsIt.email, name: "Quiere" },
       ]);
       for (const mail of sentEmails) {
         expect(mail.payload.subject).toBe("FoodSpot | Nuevo evento");
         expect(mail.payload.htmlContent).toContain(`https://food-spot.vercel.app/event/${res.body._id}`);
+        expect(mail.payload.htmlContent).toContain("<strong>Amigos</strong>");
       }
     });
 
-    it("un evento privado no notifica a nadie", async () => {
+    it("un evento privado también notifica al grupo", async () => {
       const organizer = await createUser();
-      await createUser({ notifications: { newEvent: true } as any });
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
+      const member = await createUser({ notifications: { newEvent: true } as any });
+      await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await groupEventBody(organizer, [member], { isPrivate: true }));
       await api().get("/api/cron/reminderCheck").expect(200);
-      expect(sentEmails).toHaveLength(0);
+      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([member.email]);
     });
 
-    it("si el evento pasa a privado o se cancela antes del cron, no notifica", async () => {
+    it("usa los miembros del grupo al momento del cron: incluye a quien entró y excluye a quien salió", async () => {
       const organizer = await createUser();
-      await createUser({ notifications: { newEvent: true } as any });
-      const a = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
-      const b = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
-      await updateEvent(a.body._id, { isPrivate: true });
-      await updateEvent(b.body._id, { state: "cancelled" });
+      const leaver = await createUser({ notifications: { newEvent: true } as any });
+      const joiner = await createUser({ notifications: { newEvent: true } as any });
+      const group = await createGroup({ members: [organizer._id, leaver._id] });
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { group: group._id })).expect(201);
+      await removeGroupMember(group._id, leaver._id);
+      await addGroupMembers(group._id, [joiner._id]);
+
+      await api().get("/api/cron/reminderCheck").expect(200);
+
+      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([joiner.email]);
+    });
+
+    it("si el evento se cancela antes del cron, no notifica", async () => {
+      const organizer = await createUser();
+      const member = await createUser({ notifications: { newEvent: true } as any });
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await groupEventBody(organizer, [member]));
+      await updateEvent(res.body._id, { state: "cancelled" });
 
       await api().get("/api/cron/reminderCheck").expect(200);
 
@@ -354,11 +378,11 @@ describe("POST /api/events/createEvent", () => {
 
     it("si el envío de mails falla, se intenta notificar a todos y el recordatorio se consume", async () => {
       const organizer = await createUser();
-      await createUser({ notifications: { newEvent: true } as any });
-      await createUser({ notifications: { newEvent: true } as any });
+      const a = await createUser({ notifications: { newEvent: true } as any });
+      const b = await createUser({ notifications: { newEvent: true } as any });
       setBrevoResponseStatus(500);
 
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await groupEventBody(organizer, [a, b]));
       await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
@@ -367,98 +391,12 @@ describe("POST /api/events/createEvent", () => {
     });
   });
 
-  describe("limpieza automática de eventos viejos", () => {
-    async function seedFinished(organizer: UserFixture, count: number, opts: { state?: string; isPrivate?: boolean; year?: number } = {}) {
-      const events = [];
-      for (let i = 0; i < count; i++) {
-        events.push(
-          await createEvent({
-            organizer: organizer._id,
-            title: `${opts.state ?? "finished"}-${opts.isPrivate ? "priv" : "pub"}-${i}`,
-            state: opts.state ?? "finished",
-            isPrivate: opts.isPrivate ?? false,
-            datetime: `${(opts.year ?? 2020) + i}-01-01T00:00:00.000Z`,
-          })
-        );
-      }
-      return events;
-    }
-
-    it("con más de 6 eventos públicos borra los finalizados/cancelados más viejos hasta volver a 6", async () => {
-      const organizer = await createUser();
-      const [f2020, f2021] = await seedFinished(organizer, 2, { year: 2020 });
-      const [c2022] = await seedFinished(organizer, 1, { state: "cancelled", year: 2022 });
-      await seedFinished(organizer, 3, { state: "available", year: 2025 });
-      // 6 públicos + el nuevo = 7 -> se borra 1 (el más viejo finalizado/cancelado)
-
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-
-      expect(await findEvent(f2020._id)).toBeNull();
-      expect(await findEvent(f2021._id)).not.toBeNull();
-      expect(await findEvent(c2022._id)).not.toBeNull();
-      expect(await countEvents()).toBe(6);
-    });
-
-    it("borra varios si sobran varios", async () => {
-      const organizer = await createUser();
-      await seedFinished(organizer, 5, { year: 2015 });
-      await seedFinished(organizer, 3, { state: "available", year: 2025 });
-      // 8 + 1 = 9 públicos -> borra 3
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-      expect(await countEvents()).toBe(6);
-      expect(await findEventByTitle("finished-pub-0")).toBeNull();
-      expect(await findEventByTitle("finished-pub-1")).toBeNull();
-      expect(await findEventByTitle("finished-pub-2")).toBeNull();
-      expect(await findEventByTitle("finished-pub-3")).not.toBeNull();
-    });
-
-    it("nunca borra eventos que no estén finalizados o cancelados", async () => {
-      const organizer = await createUser();
-      await seedFinished(organizer, 7, { state: "available" });
-      await seedFinished(organizer, 1, { state: "closed" });
-      await seedFinished(organizer, 1, { state: "readyforpayment" });
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-      expect(await countEvents()).toBe(10);
-    });
-
-    it("con 6 o menos eventos públicos no borra nada", async () => {
-      const organizer = await createUser();
-      await seedFinished(organizer, 5);
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-      expect(await countEvents()).toBe(6);
-    });
-
-    it("los privados no cuentan para el límite y nunca se borran", async () => {
-      const organizer = await createUser();
-      const [privOld] = await seedFinished(organizer, 1, { isPrivate: true, year: 2000 });
-      const pubs = await seedFinished(organizer, 6, { year: 2020 });
-      // 6 públicos + 1 nuevo = 7 -> borra 1, el público finalizado más viejo
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-      expect(await findEvent(privOld._id)).not.toBeNull();
-      expect(await findEvent(pubs[0]._id)).toBeNull();
-      expect(await findEvent(pubs[1]._id)).not.toBeNull();
-    });
-
-    it("al borrar un evento viejo borra también sus comprobantes, imágenes, ratings y recordatorios", async () => {
-      const organizer = await createUser();
-      const [old] = await seedFinished(organizer, 1, { year: 2000 });
-      await seedFinished(organizer, 6, { state: "available", year: 2025 });
-      const img1 = await createImage();
-      const img2 = await createImage();
-      await createPurchaseReceipt({ event: old._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id], image: img1 });
-      await createTransferReceipt({ event: old._id, user: organizer._id, amount: 10, image: img2 });
-      await createRating({ event: old._id, user: organizer._id, score: 5 });
-      await createReminder({ event: old._id, type: "eventStart", datetime: new Date("2000-01-01") });
-
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
-
-      expect(await findEvent(old._id)).toBeNull();
-      expect(await countPurchaseReceipts()).toBe(0);
-      expect(await countTransferReceipts()).toBe(0);
-      expect(await countImages()).toBe(0);
-      expect(await countRatings()).toBe(0);
-      expect(await findReminders(old._id)).toEqual([]);
-    });
+  it("crear un evento no borra eventos terminados ni cancelados (se eliminó la limpieza automática)", async () => {
+    const organizer = await createUser();
+    for (let i = 0; i < 8; i++)
+      await createEvent({ organizer: organizer._id, state: i % 2 ? "finished" : "cancelled", datetime: `${2010 + i}-01-01T00:00:00.000Z` });
+    await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
+    expect(await countEvents()).toBe(9);
   });
 });
 

@@ -624,3 +624,21 @@ Si puede salir:
 - El link de un evento solo sirve para miembros del grupo: ante un **403**, ofrecer unirse al grupo con el código.
 - Mostrar los **409** de `leaveGroup` y avisar que salir borra el grupo con sus eventos si es el último.
 - Ocultar editar, borrar y gestionar opciones al organizador que ya no está en el grupo.
+
+---
+
+### 29. Aviso de evento nuevo por grupo y fin de la limpieza automática
+
+**Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** no · **Origen:** GROUPS_FEATURE §5.4, paso 5
+
+#### Mail de evento nuevo
+- Antes: lo recibían **todos** los usuarios del sistema con `notifications.newEvent`, y solo si el evento era público.
+- Ahora: lo reciben los **miembros del grupo** del evento con `notifications.newEvent`, sin el organizador. `isPrivate` ya no cuenta: un evento privado también se avisa al grupo.
+- Los miembros se leen cuando corre el cron (`reminderCheck`), no al crear el evento: quien entró al grupo en el medio lo recibe y quien salió no.
+- El mail menciona el nombre del grupo. Si el evento se canceló antes del cron, no se manda (sin cambios).
+
+#### Limpieza automática de eventos viejos
+Se eliminó: antes, al crear un evento, si había más de 6 eventos públicos se borraban los terminados o cancelados más viejos (de cualquier grupo, con su historial de pagos). Ahora los eventos terminados quedan como historial del grupo.
+
+#### Cómo adaptar el front (probable)
+- Nada obligatorio. Si la pantalla de preferencias describe el aviso de evento nuevo, aclarar que es "eventos nuevos de mis grupos".

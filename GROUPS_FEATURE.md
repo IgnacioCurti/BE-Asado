@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 4 del plan (sección 9).
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 5 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -307,10 +307,10 @@ Los endpoints que hoy validan "miembro del evento" (`eventParticipant`, `optionV
 
 ### 5.4 Efectos colaterales en la lógica existente
 
-- **`deleteEvents()`** ([src/controllers/events.ts](src/controllers/events.ts)): se ejecuta en cada `createEvent`. Cuenta los eventos públicos **globales** y, cuando hay más de 6, borra los finished/cancelled más viejos. Al eliminar `isPrivate`, el conteo deja de tener sentido, y con grupos borraría eventos (con su historial financiero) de otros grupos. ✅ **Se elimina `deleteEvents()`** junto con su llamada en `createEvent`. Los eventos terminados quedan como historial del grupo.
-- **`notifyNewEvent`**: hoy manda el mail a todos los usuarios con `notifications.newEvent`. Tiene que mandarlo solo a los **miembros del grupo** del evento, sin incluir al organizador. Se elimina el chequeo `event.isPrivate`.
-- **`createEvent`**: hoy crea el Reminder `newEvent` solo si `!isPrivate`. Pasa a crearlo siempre, porque el filtro lo hace el grupo.
-- **Templates de mail**: el mail de nuevo evento debería mencionar el grupo. Hace falta un template nuevo para la invitación.
+- **`deleteEvents()`** ([src/controllers/events.ts](src/controllers/events.ts)): se ejecuta en cada `createEvent`. Cuenta los eventos públicos **globales** y, cuando hay más de 6, borra los finished/cancelled más viejos. Al eliminar `isPrivate`, el conteo deja de tener sentido, y con grupos borraría eventos (con su historial financiero) de otros grupos. ✅ **Se elimina `deleteEvents()`** junto con su llamada en `createEvent`. Los eventos terminados quedan como historial del grupo. (Hecho en el paso 5.)
+- **`notifyNewEvent`**: hoy manda el mail a todos los usuarios con `notifications.newEvent`. Tiene que mandarlo solo a los **miembros del grupo** del evento, sin incluir al organizador. Se elimina el chequeo `event.isPrivate`. ✅ (paso 5)
+- **`createEvent`**: hoy crea el Reminder `newEvent` solo si `!isPrivate`. Pasa a crearlo siempre, porque el filtro lo hace el grupo. ✅ (paso 5)
+- **Templates de mail**: el mail de nuevo evento menciona el grupo ✅ (paso 5). Hace falta un template nuevo para la invitación.
 - **`isDebtor` / `hasPendingTransfers`**: siguen siendo globales. Para 4.4 hace falta una variante por grupo.
 
 ## 6. API propuesta
@@ -377,7 +377,10 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
    - `leaveGroup` aplica todas las reglas de 4.4 (deudas, roles en `closed`/`readyforpayment`, baja de los `available`) y el borrado del grupo vacío incluye sus eventos (4.6), cada uno en una transacción.
    - `unsubscribeFromEvent` libera los roles en eventos `available`.
    - ⏸️ Sin cambios: `getEvents`, `getPublicAndPrivateEvents` y `getPublicEvents` siguen filtrando por `isPrivate` y muestran eventos de todos los grupos (5.2 y paso 8).
-5. Notificaciones por grupo + eliminar `deleteEvents()`.
+5. Notificaciones por grupo + eliminar `deleteEvents()`. ✅ (rama `t/groups-model`):
+   - El aviso de evento nuevo va a los miembros del grupo con `notifications.newEvent`, sin el organizador; los miembros se leen al correr el cron. El mail menciona el grupo (nombre escapado).
+   - `createEvent` programa siempre el recordatorio `newEvent`; se quitó el chequeo de `isPrivate` en `notifyNewEvent`.
+   - Se eliminó la limpieza automática (`pruneEndedEvents`, `countPublic`, `findPublicEndedOldestFirst`).
 6. Portadas (subir, borrar y acceso en `getImage`).
 7. Invitaciones por mail, opción A.
 8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7).
