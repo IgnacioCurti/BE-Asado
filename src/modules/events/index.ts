@@ -11,6 +11,9 @@ import { EventController } from "./EventController.js";
 import { EventMapper } from "./EventMapper.js";
 import { EventRepository } from "./EventRepository.js";
 import { EventService } from "./EventService.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
+
+const groupRepository = new GroupRepository();
 
 export const reminderScheduler = new ReminderScheduler(new ReminderRepository());
 
@@ -24,11 +27,13 @@ const eventService = new EventService({
   options: new OptionRepository(),
   transferReceipts: new TransferReceiptRepository(),
   reminders: reminderScheduler,
+  groups: groupRepository,
 });
 
 export const eventController = new EventController(eventService);
 export const eventAccessPolicy = new EventAccessPolicy(
   new EventRepository(),
-  new TransferReceiptRepository()
+  new TransferReceiptRepository(),
+  groupRepository
 );
 export { EventService };

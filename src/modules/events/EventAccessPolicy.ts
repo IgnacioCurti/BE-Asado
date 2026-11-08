@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../../core/errors/AppError.js";
 import { isValidId } from "../../core/validation/isValidId.js";
 import { IEvent, ITransferReceipt } from "../../models/interfaces.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { EventRepository } from "./EventRepository.js";
 
@@ -13,16 +14,21 @@ const notOrganizerOrDesigneeMessage: string =
 // Reglas de acceso por rol dentro de un evento. Cada método valida los ids,
 // carga el recurso y lanza AppError (400 / 404 / 403) si el usuario no puede.
 // Las usan los middlewares de autorización de las rutas.
+// Los permisos de organizador exigen además ser miembro actual del grupo del
+// evento (GROUPS_FEATURE.md §4.4.1): el organizador que salió del grupo ya no
+// edita ni borra. Los designados no lo necesitan: no pueden salir del grupo
+// con un rol activo, y en los eventos available la baja les quita el rol.
 export class EventAccessPolicy {
   constructor(
     private readonly events: Pick<EventRepository, "findById" | "findByOption">,
-    private readonly transferReceipts: Pick<TransferReceiptRepository, "findById">
+    private readonly transferReceipts: Pick<TransferReceiptRepository, "findById">,
+    private readonly groups: Pick<GroupRepository, "hasMember">
   ) {}
 
   async assertOrganizer(eventId: string, userId: string): Promise<void> {
     this.assertValidIds(eventId);
     const event: IEvent = await this.getEvent(eventId);
-    if (event.organizer.toString() !== userId)
+    if (!(await this.isActiveOrganizer(event, userId)))
       throw new ForbiddenError("Access denied. The user is not the event's organizer.");
   }
 
@@ -34,15 +40,15 @@ export class EventAccessPolicy {
       throw new ForbiddenError("Access denied. The user is not a participant of the event.");
   }
 
-  // Ver los pagos de un evento. Provisorio hasta que exista Event.group (GROUPS_FEATURE.md §5.1):
-  // los de un evento público los ve cualquier usuario autenticado; los de uno privado, solo sus miembros.
-  // Con grupos pasa a ser "miembro del grupo del evento o miembro del evento".
+  // Ver un evento (detalle, pagos, montos): miembro del grupo del evento o
+  // miembro del evento (GROUPS_FEATURE.md §5.1). Lo segundo deja ver el
+  // historial a quien salió del grupo pero sigue en un evento cerrado.
   async assertViewer(eventId: string, userId: string): Promise<void> {
     this.assertValidIds(eventId);
     const event: IEvent = await this.getEvent(eventId);
-    if (!event.isPrivate) return;
-    if (!event.members.some((member) => member.toString() === userId))
-      throw new ForbiddenError("Access denied. The user is not a participant of the event.");
+    if (event.members.some((member) => member.toString() === userId)) return;
+    if (!(await this.groups.hasMember(event.group, userId)))
+      throw new ForbiddenError("Access denied. The user is not a member of the event's group.");
   }
 
   async assertShoppingDesignee(eventId: string, userId: string): Promise<void> {
@@ -55,7 +61,7 @@ export class EventAccessPolicy {
   async assertOrganizerOrDesignee(eventId: string, userId: string): Promise<void> {
     this.assertValidIds(userId, eventId);
     const event: IEvent = await this.getEvent(eventId);
-    if (!this.isOrganizerOrDesignee(event, userId))
+    if (!(await this.isOrganizerOrDesignee(event, userId)))
       throw new ForbiddenError(notOrganizerOrDesigneeMessage);
   }
 
@@ -66,7 +72,7 @@ export class EventAccessPolicy {
       ? await this.events.findById(eventId)
       : await this.events.findByOption(optionId);
     if (!event) throw new NotFoundError(eventId ? eventNotFoundMessage : "Option not found");
-    if (!this.isOrganizerOrDesignee(event, userId))
+    if (!(await this.isOrganizerOrDesignee(event, userId)))
       throw new ForbiddenError(notOrganizerOrDesigneeMessage);
   }
 
@@ -102,7 +108,11 @@ export class EventAccessPolicy {
     return event.shoppingDesignee.some((id) => id.toString() === userId);
   }
 
-  private isOrganizerOrDesignee(event: IEvent, userId: string): boolean {
-    return event.organizer.toString() === userId || this.isDesignee(event, userId);
+  private async isActiveOrganizer(event: IEvent, userId: string): Promise<boolean> {
+    return event.organizer.toString() === userId && this.groups.hasMember(event.group, userId);
+  }
+
+  private async isOrganizerOrDesignee(event: IEvent, userId: string): Promise<boolean> {
+    return this.isDesignee(event, userId) || this.isActiveOrganizer(event, userId);
   }
 }

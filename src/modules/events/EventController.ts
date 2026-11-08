@@ -18,6 +18,10 @@ export class EventController {
     return res.status(STATUS_CODES.OK).json(await this.service.listPublicVisibleTo(req.user._id));
   };
 
+  listByGroup = async (req: Request, res: Response): Promise<Response> => {
+    return res.status(STATUS_CODES.OK).json(await this.service.listByGroup(req.params.group));
+  };
+
   getById = async (req: Request, res: Response): Promise<Response> => {
     return res.json(await this.service.getDetails(req.params.id));
   };

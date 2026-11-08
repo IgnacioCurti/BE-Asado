@@ -136,14 +136,23 @@ describe("Event schema", () => {
     description: "desc",
     memberLimit: 10,
     organizer: oid(),
+    group: oid(),
   });
 
   it("un evento mínimo es válido", () => {
     expect(errorsOf(new Event(valid()))).toEqual([]);
   });
 
-  it("title, datetime, description, memberLimit y organizer son obligatorios", () => {
-    expect(errorsOf(new Event({}))).toEqual(["datetime", "description", "memberLimit", "organizer", "title"]);
+  it("title, datetime, description, memberLimit, organizer y group son obligatorios", () => {
+    expect(errorsOf(new Event({}))).toEqual(["datetime", "description", "group", "memberLimit", "organizer", "title"]);
+  });
+
+  it("el grupo no se puede cambiar una vez creado el evento", () => {
+    const original = oid();
+    const event = new Event({ ...valid(), group: original });
+    event.isNew = false;
+    event.group = oid() as any;
+    expect(String(event.group)).toBe(String(original));
   });
 
   it("aplica los defaults", () => {

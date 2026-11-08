@@ -27,7 +27,17 @@ function setup() {
     removeMemberKeepingAnAdmin: vi.fn(),
     deleteIfOnlyMember: vi.fn(),
   };
-  return { service: new GroupService(groups as any), groups };
+  const session = { fake: "session" };
+  const events = {
+    findActiveInGroupInvolving: vi.fn().mockResolvedValue([]),
+    removeUserFromAvailableInGroup: vi.fn(),
+    findIdsByGroup: vi.fn().mockResolvedValue([]),
+    deleteCascade: vi.fn(),
+  };
+  const debtors = { getDebtors: vi.fn().mockResolvedValue([]) };
+  const transaction = vi.fn(async (work: (session: unknown) => unknown) => work(session));
+  const service = new GroupService(groups as any, { events, debtors, transaction } as any);
+  return { service, groups, events, debtors, transaction, session };
 }
 
 describe("GroupService.create", () => {
@@ -81,33 +91,124 @@ describe("GroupService.join", () => {
 });
 
 describe("GroupService.leave", () => {
-  it("último miembro: borra el grupo", async () => {
-    const { service, groups } = setup();
+  const ConflictWith = (text: string) => expect.objectContaining({ status: 409, message: expect.stringContaining(text) });
+
+  it("último miembro: en una transacción borra el grupo y sus eventos", async () => {
+    const { service, groups, events, session } = setup();
     const user = oid();
-    groups.findById.mockResolvedValue({ _id: oid(), members: [user], admins: [user] });
+    const group = { _id: oid(), members: [user], admins: [user] };
+    const eventIds = [oid(), oid()];
+    groups.findById.mockResolvedValue(group);
     groups.deleteIfOnlyMember.mockResolvedValue(true);
-    expect(await service.leave(s(oid()), s(user))).toEqual({ groupDeleted: true });
+    events.findIdsByGroup.mockResolvedValue(eventIds);
+
+    expect(await service.leave(s(group._id), s(user))).toEqual({ groupDeleted: true });
+    expect(groups.deleteIfOnlyMember).toHaveBeenCalledWith(group._id, user, session);
+    expect(events.findIdsByGroup).toHaveBeenCalledWith(group._id, session);
+    expect(events.deleteCascade).toHaveBeenCalledWith(eventIds, session);
     expect(groups.removeMemberKeepingAnAdmin).not.toHaveBeenCalled();
   });
 
-  it("era el último pero alguien entró en el medio y es el único admin -> ConflictError", async () => {
-    const { service, groups } = setup();
+  it("si el grupo no se borró, no borra sus eventos", async () => {
+    const { service, groups, events } = setup();
     const user = oid();
     groups.findById
       .mockResolvedValueOnce({ _id: oid(), members: [user], admins: [user] })
       .mockResolvedValueOnce({ _id: oid(), members: [user, oid()], admins: [user] });
     groups.deleteIfOnlyMember.mockResolvedValue(false);
     await expect(service.leave(s(oid()), s(user))).rejects.toBeInstanceOf(ConflictError);
+    expect(events.deleteCascade).not.toHaveBeenCalled();
   });
 
-  it("el grupo se borró en el medio -> NotFoundError", async () => {
-    const { service, groups } = setup();
+  it("un miembro sale: en la misma transacción se lo da de baja de los eventos available", async () => {
+    const { service, groups, events, session } = setup();
     const user = oid();
-    groups.findById
-      .mockResolvedValueOnce({ _id: oid(), members: [user, oid()], admins: [oid()] })
-      .mockResolvedValueOnce(null);
+    const group = { _id: oid(), members: [oid(), user], admins: [oid()] };
+    groups.findById.mockResolvedValue(group);
+    groups.removeMemberKeepingAnAdmin.mockResolvedValue({});
+
+    expect(await service.leave(s(group._id), s(user))).toEqual({ groupDeleted: false });
+    expect(groups.removeMemberKeepingAnAdmin).toHaveBeenCalledWith(group._id, user, session);
+    expect(events.removeUserFromAvailableInGroup).toHaveBeenCalledWith(group._id, user, session);
+  });
+
+  it("si no pudo salir del grupo, no lo da de baja de los eventos", async () => {
+    const { service, groups, events } = setup();
+    const user = oid();
+    const group = { _id: oid(), members: [oid(), user], admins: [oid()] };
+    groups.findById.mockResolvedValueOnce(group).mockResolvedValueOnce(null);
     groups.removeMemberKeepingAnAdmin.mockResolvedValue(null);
-    await expect(service.leave(s(oid()), s(user))).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.leave(s(group._id), s(user))).rejects.toBeInstanceOf(NotFoundError);
+    expect(events.removeUserFromAvailableInGroup).not.toHaveBeenCalled();
+  });
+
+  it("único admin con otros miembros -> ConflictError antes de mirar los eventos", async () => {
+    const { service, groups, events, transaction } = setup();
+    const user = oid();
+    groups.findById.mockResolvedValue({ _id: oid(), members: [user, oid()], admins: [user] });
+    await expect(service.leave(s(oid()), s(user))).rejects.toEqual(ConflictWith("only admin"));
+    expect(events.findActiveInGroupInvolving).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("con deuda en un evento readyforpayment del grupo -> ConflictError y no sale", async () => {
+    const { service, groups, events, debtors, transaction } = setup();
+    const user = oid();
+    const event = { _id: oid(), state: "readyforpayment", members: [user], chef: null, shoppingDesignee: [oid()] };
+    groups.findById.mockResolvedValue({ _id: oid(), members: [oid(), user], admins: [oid()] });
+    events.findActiveInGroupInvolving.mockResolvedValue([event]);
+    debtors.getDebtors.mockResolvedValue([{ _id: user }]);
+
+    await expect(service.leave(s(oid()), s(user))).rejects.toEqual(ConflictWith("pending payments"));
+    expect(debtors.getDebtors).toHaveBeenCalledWith(event._id);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("sin deuda propia (deben otros) puede salir", async () => {
+    const { service, groups, events, debtors } = setup();
+    const user = oid();
+    groups.findById.mockResolvedValue({ _id: oid(), members: [oid(), user], admins: [oid()] });
+    events.findActiveInGroupInvolving.mockResolvedValue([
+      { _id: oid(), state: "readyforpayment", members: [user], chef: null, shoppingDesignee: [oid()] },
+    ]);
+    debtors.getDebtors.mockResolvedValue([{ _id: oid() }]);
+    groups.removeMemberKeepingAnAdmin.mockResolvedValue({});
+    await expect(service.leave(s(oid()), s(user))).resolves.toEqual({ groupDeleted: false });
+  });
+
+  it("en un evento closed no hay deudas: no las consulta", async () => {
+    const { service, groups, events, debtors } = setup();
+    const user = oid();
+    groups.findById.mockResolvedValue({ _id: oid(), members: [oid(), user], admins: [oid()] });
+    events.findActiveInGroupInvolving.mockResolvedValue([
+      { _id: oid(), state: "closed", members: [user], chef: null, shoppingDesignee: [oid()] },
+    ]);
+    groups.removeMemberKeepingAnAdmin.mockResolvedValue({});
+    await service.leave(s(oid()), s(user));
+    expect(debtors.getDebtors).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["chef", "closed", { chef: "me" }],
+    ["designado", "closed", { shoppingDesignee: ["me"] }],
+    ["chef", "readyforpayment", { chef: "me" }],
+    ["designado", "readyforpayment", { shoppingDesignee: ["me"] }],
+  ])("siendo %s de un evento %s del grupo -> ConflictError y no sale", async (_role, state, role) => {
+    const { service, groups, events, transaction } = setup();
+    const user = oid();
+    const resolve = (v: unknown) => (v === "me" ? user : v);
+    groups.findById.mockResolvedValue({ _id: oid(), members: [oid(), user], admins: [oid()] });
+    events.findActiveInGroupInvolving.mockResolvedValue([
+      {
+        _id: oid(),
+        state,
+        members: [user],
+        chef: resolve((role as any).chef ?? null),
+        shoppingDesignee: ((role as any).shoppingDesignee ?? []).map(resolve),
+      },
+    ]);
+    await expect(service.leave(s(oid()), s(user))).rejects.toEqual(ConflictWith("chef or a shopping designee"));
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it("no es miembro -> ForbiddenError", async () => {

@@ -16,6 +16,8 @@ import {
   IPublicEvent,
   ITransferInfo,
 } from "../../models/interfaces.js";
+import { groupNotFoundMessage } from "../groups/GroupAccessPolicy.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { ReminderScheduler } from "../notifications/ReminderScheduler.js";
 import { OptionRepository } from "../options/OptionRepository.js";
 import { PaymentCalculator } from "../payments/PaymentCalculator.js";
@@ -34,6 +36,7 @@ const STATES_WITHOUT_UNSUBSCRIBE: string[] = ["closed", "readyforpayment"];
 const userNotFoundMessage: string = "The user with the given ID was not found.";
 const rolesFrozenMessage: string = "Roles can only change while the event is available.";
 const chefTakenMessage: string = "The event already has a chef.";
+const notGroupMemberMessage: string = "Access denied. The user is not a member of the event's group.";
 
 // Al crear un evento, si hay más de MAX_PUBLIC_EVENTS públicos se borran los
 // públicos terminados o cancelados más viejos.
@@ -98,7 +101,9 @@ export interface EventServiceDeps {
     | "findPublicEndedOldestFirst"
     | "deleteCascade"
     | "updateRolesIfAllowed"
+    | "findByGroup"
   >;
+  groups: Pick<GroupRepository, "findById" | "hasMember">;
   paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
   users: Pick<UserRepository, "findById">;
   purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save">;
@@ -124,6 +129,12 @@ export class EventService {
     return this.deps.mapper.toPublicList(await this.deps.events.findSummariesVisibleTo(userId));
   }
 
+  // Eventos del grupo para su pantalla. Que el usuario sea miembro lo valida el
+  // middleware groupMember.
+  listByGroup(groupId: string): Promise<IEvent[]> {
+    return this.deps.events.findByGroup(groupId);
+  }
+
   async getDetails(id: string): Promise<IEventPopulatedWithOptions> {
     if (!isValidId(id)) throw new BadRequestError(invalidObjectIdMessage);
     const event = await this.deps.events.findByIdWithDetails(id);
@@ -144,15 +155,17 @@ export class EventService {
     return this.deps.payments.transfersFor(event.purchaseReceipts);
   }
 
-  // Cada miembro ve su costo; organizador y designados ven el de cualquiera.
+  // Cada miembro ve su costo; organizador (si sigue en el grupo) y designados
+  // ven el de cualquiera.
   async getMemberCost(eventId: string, memberId: string, requesterId: string): Promise<number> {
     const event: IEventWithPurchaseReceipts | null =
       await this.deps.events.findByIdWithPurchaseReceiptIds(eventId);
     if (!event) throw new NotFoundError(eventNotFoundMessage);
-    const canSeeOthers: boolean =
-      event.organizer.toString() === requesterId ||
-      event.shoppingDesignee.some((id) => id.toString() === requesterId);
-    if (memberId !== requesterId && !canSeeOthers)
+    const canSeeOthers = async (): Promise<boolean> =>
+      event.shoppingDesignee.some((id) => id.toString() === requesterId) ||
+      (event.organizer.toString() === requesterId &&
+        (await this.deps.groups.hasMember(event.group, requesterId)));
+    if (memberId !== requesterId && !(await canSeeOthers()))
       throw new ForbiddenError(
         "Access denied. Only the event's organizer or shopping designees can see other members' costs."
       );
@@ -165,10 +178,13 @@ export class EventService {
     return this.deps.payments.memberCost(event.purchaseReceipts, member);
   }
 
-  // El usuario se suma al evento y a los recibos de compra ya cargados.
+  // El usuario se suma al evento y a los recibos de compra ya cargados. Tiene
+  // que ser miembro del grupo del evento (GROUPS_FEATURE.md §5.1).
   async subscribe(eventId: string, userId: string): Promise<IEventWithPurchaseReceipts | null> {
     const event: IEvent = await this.getEvent(eventId);
     const user = new mongoose.Types.ObjectId(userId);
+    if (!(await this.deps.groups.hasMember(event.group, user)))
+      throw new ForbiddenError(notGroupMemberMessage);
     const precheck: string | null = this.cannotJoinMessage(event, user);
     if (precheck) throw new BadRequestError(precheck);
     if (!(await this.deps.users.findById(userId))) throw new BadRequestError(userNotFoundMessage);
@@ -185,7 +201,10 @@ export class EventService {
     return this.deps.events.findByIdWithPurchaseReceiptIds(String(event._id));
   }
 
-  // El usuario sale del evento, de sus recibos de compra y de sus votos.
+  // El usuario sale del evento, de sus recibos de compra y de sus votos. Con
+  // el evento available suelta también sus roles: un rol requiere ser miembro
+  // (GROUPS_FEATURE.md §4.4). En finished/cancelled los roles quedan
+  // congelados como historial (§4.4.2).
   async unsubscribe(eventId: string, userId: string): Promise<IEventWithPurchaseReceiptsOptions> {
     const event: IEventWithPurchaseReceiptsOptions | null =
       await this.deps.events.findByIdWithReceiptsAndOptions(eventId);
@@ -209,6 +228,10 @@ export class EventService {
       await this.deps.options.save(option);
     }
     event.members.splice(index, 1);
+    if (event.state === "available") {
+      if (event.chef && member.equals(event.chef)) event.chef = null;
+      event.shoppingDesignee = event.shoppingDesignee.filter((id) => !member.equals(id));
+    }
     await this.deps.events.save(event);
     return event;
   }
@@ -280,9 +303,11 @@ export class EventService {
     return event;
   }
 
-  // El organizador es el usuario del token. Solo puede sumarse a sí mismo como
-  // miembro (members incluye su id), chef (isChef) o comprador (isShoppingDesignee).
+  // El organizador es el usuario del token y tiene que ser miembro del grupo
+  // (body.group). Solo puede sumarse a sí mismo como miembro (members incluye
+  // su id), chef (isChef) o comprador (isShoppingDesignee).
   async create(organizerId: string, body: Record<string, any>): Promise<IEvent> {
+    const group = await this.parseGroupForNewEvent(body.group, organizerId);
     const fields: Record<string, unknown> = Object.fromEntries(
       CREATE_EVENT_FIELDS.filter((field) => field in body).map((field) => [field, body[field]])
     );
@@ -291,6 +316,7 @@ export class EventService {
       Array.isArray(body.members) && body.members.some((id: unknown) => String(id) === organizerId);
     const event: IEvent = this.deps.events.build({
       ...fields,
+      group,
       organizer,
       members: joins ? [organizer] : [],
       chef: body.isChef ? organizer : null,
@@ -322,6 +348,21 @@ export class EventService {
     const ended: IEvent[] = await this.deps.events.findPublicEndedOldestFirst();
     const toDelete: IEvent[] = ended.slice(0, totalPublic - MAX_PUBLIC_EVENTS);
     await this.deps.events.deleteCascade(toDelete.map((event) => event._id));
+  }
+
+  private async parseGroupForNewEvent(
+    groupId: unknown,
+    userId: string
+  ): Promise<mongoose.Types.ObjectId> {
+    if (groupId === undefined || groupId === null || groupId === "")
+      throw new BadRequestError("The event's group is required.");
+    if (typeof groupId !== "string" || !isValidId(groupId))
+      throw new BadRequestError(invalidObjectIdMessage);
+    const group = await this.deps.groups.findById(groupId);
+    if (!group) throw new NotFoundError(groupNotFoundMessage);
+    if (!group.members.some((member) => member.toString() === userId))
+      throw new ForbiddenError("Access denied. The user is not a member of the group.");
+    return group._id;
   }
 
   private async getEvent(id: string): Promise<IEvent> {

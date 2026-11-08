@@ -1,6 +1,7 @@
 import express from "express";
 import {
   auth,
+  groupMember,
   sameUser,
   eventOrganizer,
   eventViewer,
@@ -21,9 +22,14 @@ eventRouter.get(
   asyncHandler(eventController.listPublicAndPrivate)
 );
 
-// Cualquier usuario logueado con el id (el link) ve el evento, también si es
-// privado: así se suma a un evento privado hasta que existan los grupos.
-eventRouter.get("/getEventById/:id", auth, asyncHandler(eventController.getById));
+// Eventos de un grupo (GROUPS_FEATURE.md §6).
+eventRouter.get(
+  "/getGroupEvents/:group",
+  [auth, groupMember],
+  asyncHandler(eventController.listByGroup)
+);
+
+eventRouter.get("/getEventById/:id", [auth, eventViewer], asyncHandler(eventController.getById));
 
 eventRouter.get(
   "/getMembersAndReceiptsInfo/:event",

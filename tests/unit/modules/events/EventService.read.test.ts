@@ -17,8 +17,9 @@ function setup() {
   };
   const transferReceipts = { membersWhoHaveUploaded: vi.fn() };
   const payments = { transfersFor: vi.fn(), memberCost: vi.fn() };
-  const service = new EventService({ events, transferReceipts, payments, mapper: new EventMapper() } as any);
-  return { service, events, transferReceipts, payments };
+  const groups = { hasMember: vi.fn().mockResolvedValue(true) };
+  const service = new EventService({ events, transferReceipts, payments, groups, mapper: new EventMapper() } as any);
+  return { service, events, transferReceipts, payments, groups };
 }
 
 describe("EventMapper.toPublic", () => {
@@ -121,6 +122,15 @@ describe("EventService.getMemberCost", () => {
     events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
     payments.memberCost.mockReturnValue(1);
     await expect(service.getMemberCost("e", String(member), String(requester))).resolves.toBe(1);
+  });
+
+  it("el organizador que salió del grupo ya no ve el costo de otros; el suyo sí", async () => {
+    const { service, events, groups, payments } = setup();
+    events.findByIdWithPurchaseReceiptIds.mockResolvedValue(eventWith());
+    groups.hasMember.mockResolvedValue(false);
+    payments.memberCost.mockReturnValue(3);
+    await expect(service.getMemberCost("e", String(member), String(organizer))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.getMemberCost("e", String(organizer), String(organizer))).resolves.toBe(3);
   });
 
   it("un miembro no ve el costo de otro -> ForbiddenError", async () => {

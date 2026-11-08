@@ -50,6 +50,13 @@ export class GroupRepository extends BaseRepository<IGroup> {
     return this.model.find({ members: userId }).sort({ createdAt: -1, _id: 1 }).exec();
   }
 
+  async hasMember(
+    groupId: mongoose.Types.ObjectId | string,
+    userId: mongoose.Types.ObjectId | string
+  ): Promise<boolean> {
+    return Boolean(await this.model.exists({ _id: groupId, members: userId }).exec());
+  }
+
   countByMember(userId: string): Promise<number> {
     return this.model.countDocuments({ members: userId }).exec();
   }
@@ -98,7 +105,8 @@ export class GroupRepository extends BaseRepository<IGroup> {
   // admin: o no es admin, o hay otro admin. No aplica al último miembro.
   removeMemberKeepingAnAdmin(
     groupId: mongoose.Types.ObjectId,
-    userId: mongoose.Types.ObjectId
+    userId: mongoose.Types.ObjectId,
+    session?: mongoose.ClientSession
   ): Promise<IGroup | null> {
     return this.model
       .findOneAndUpdate(
@@ -109,33 +117,25 @@ export class GroupRepository extends BaseRepository<IGroup> {
           $or: [{ admins: { $ne: userId } }, { "admins.1": { $exists: true } }],
         },
         { $pull: { members: userId, admins: userId } },
-        { new: true }
+        { new: true, session }
       )
       .exec();
   }
 
   // Borra el grupo solo si el usuario es su único miembro, junto con sus
-  // portadas, en una transacción (§4.6). true si lo borró.
+  // portadas (§4.6). Corre dentro de la transacción de quien llama, que
+  // borra también los eventos del grupo. true si lo borró.
   async deleteIfOnlyMember(
     groupId: mongoose.Types.ObjectId,
-    userId: mongoose.Types.ObjectId
+    userId: mongoose.Types.ObjectId,
+    session: mongoose.ClientSession
   ): Promise<boolean> {
-    const session: mongoose.ClientSession = await mongoose.startSession();
-    try {
-      let deleted: boolean = false;
-      await session.withTransaction(async () => {
-        const group: IGroup | null = await this.model
-          .findOneAndDelete({ _id: groupId, members: [userId] })
-          .session(session)
-          .exec();
-        deleted = Boolean(group);
-        if (group)
-          await Image.deleteMany({ _id: { $in: group.coverPhotos } }).session(session).exec();
-      });
-      return deleted;
-    } finally {
-      await session.endSession();
-    }
+    const group: IGroup | null = await this.model
+      .findOneAndDelete({ _id: groupId, members: [userId] })
+      .session(session)
+      .exec();
+    if (group) await Image.deleteMany({ _id: { $in: group.coverPhotos } }).session(session).exec();
+    return Boolean(group);
   }
 
   private async withUniqueCode<T>(write: (code: string) => Promise<T>): Promise<T> {

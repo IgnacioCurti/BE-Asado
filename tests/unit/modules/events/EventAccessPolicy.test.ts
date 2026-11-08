@@ -10,13 +10,28 @@ const designee = id();
 const member = id();
 const outsider = id();
 
-const event = { organizer, shoppingDesignee: [designee], members: [organizer, designee, member] };
+const groupMember = id();
+const group = id();
+const event = { group, organizer, shoppingDesignee: [designee], members: [organizer, designee, member] };
 
-function setup(found: unknown = event) {
+// Miembros del grupo del evento: los del evento más groupMember.
+function setup(found: unknown = event, groupMembers = [organizer, designee, member, groupMember]) {
   const events = { findById: vi.fn().mockResolvedValue(found), findByOption: vi.fn().mockResolvedValue(found) };
   const transferReceipts = { findById: vi.fn() };
-  return { policy: new EventAccessPolicy(events as any, transferReceipts as any), events, transferReceipts };
+  const groups = {
+    hasMember: vi.fn(async (g: unknown, u: unknown) =>
+      String(g) === String(group) && groupMembers.some((m) => String(m) === String(u))
+    ),
+  };
+  return {
+    policy: new EventAccessPolicy(events as any, transferReceipts as any, groups as any),
+    events,
+    transferReceipts,
+    groups,
+  };
 }
+
+const withoutOrganizer = [designee, member, groupMember];
 
 const s = (oid: mongoose.Types.ObjectId) => String(oid);
 const eventId = s(id());
@@ -26,7 +41,7 @@ describe("EventAccessPolicy por rol", () => {
     ["assertOrganizer", organizer, [designee, member]],
     ["assertMember", member, [outsider]],
     ["assertShoppingDesignee", designee, [organizer, member]],
-    ["assertOrganizerOrDesignee", organizer, [member, outsider]],
+    ["assertOrganizerOrDesignee", organizer, [member, outsider, groupMember]],
   ] as const)("%s permite al rol correcto y rechaza al resto", async (method, allowed, denied) => {
     const { policy } = setup();
     await expect(policy[method](eventId, s(allowed))).resolves.toBeUndefined();
@@ -52,16 +67,38 @@ describe("EventAccessPolicy por rol", () => {
   });
 });
 
+describe("EventAccessPolicy: organizador que salió del grupo", () => {
+  it.each(["assertOrganizer", "assertOrganizerOrDesignee"] as const)(
+    "%s lo rechaza aunque siga siendo el organizer",
+    async (method) => {
+      const { policy } = setup(event, withoutOrganizer);
+      await expect(policy[method](eventId, s(organizer))).rejects.toBeInstanceOf(ForbiddenError);
+    }
+  );
+
+  it("assertOptionManager lo rechaza; el designado sigue pudiendo", async () => {
+    const { policy } = setup(event, withoutOrganizer);
+    await expect(policy.assertOptionManager(eventId, "", s(organizer))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(policy.assertOptionManager(eventId, "", s(designee))).resolves.toBeUndefined();
+  });
+});
+
 describe("EventAccessPolicy.assertViewer", () => {
-  it("evento público: cualquier usuario lo ve", async () => {
-    const { policy } = setup({ ...event, isPrivate: false });
-    await expect(policy.assertViewer(eventId, s(outsider))).resolves.toBeUndefined();
+  it("pasa un miembro del grupo aunque no sea miembro del evento", async () => {
+    const { policy } = setup();
+    await expect(policy.assertViewer(eventId, s(groupMember))).resolves.toBeUndefined();
   });
 
-  it("evento privado: pasa un miembro y rechaza a quien no lo es", async () => {
-    const { policy } = setup({ ...event, isPrivate: true });
-    await expect(policy.assertViewer(eventId, s(member))).resolves.toBeUndefined();
-    await expect(policy.assertViewer(eventId, s(outsider))).rejects.toBeInstanceOf(ForbiddenError);
+  it("pasa un miembro del evento que ya no está en el grupo (historial)", async () => {
+    const { policy } = setup(event, withoutOrganizer);
+    await expect(policy.assertViewer(eventId, s(organizer))).resolves.toBeUndefined();
+  });
+
+  it("rechaza a quien no es miembro del grupo ni del evento", async () => {
+    const { policy } = setup();
+    await expect(policy.assertViewer(eventId, s(outsider))).rejects.toEqual(
+      new ForbiddenError("Access denied. The user is not a member of the event's group.")
+    );
   });
 
   it("id inválido -> BadRequestError; inexistente -> NotFoundError", async () => {

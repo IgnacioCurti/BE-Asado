@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Todavía no hay nada implementado.
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 4 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -166,7 +166,7 @@ flowchart TD
 ```
 
 - En los eventos `available`, ser chef o designee no bloquea: la baja automática del evento también libera esos roles.
-- ⚠️ **Hoy `unsubscribeFromEvent` no libera los roles.** Saca al usuario de `members`, de las opciones y de los participantes de los comprobantes, pero si era `chef` o `shoppingDesignee` sigue figurando como tal. Hay que corregirlo para la baja manual y para la automática (y es coherente con 4.4.2: un rol requiere ser miembro del evento).
+- ✅ **`unsubscribeFromEvent` libera los roles** (paso 4) cuando el evento está `available`, igual que la baja automática al salir del grupo. En `finished`/`cancelled` (los únicos otros estados donde se puede desuscribir) los roles quedan como historial, porque desde `closed` en adelante están congelados (4.4.2).
 - Las deudas se chequean reutilizando la lógica de `isDebtor`/`hasPendingTransfers`, filtrada por los eventos del grupo.
 - Un ex-miembro que sigue en `members` de un evento terminado puede seguir viendo ese evento: para leer un evento alcanza con ser miembro del grupo **o** miembro del evento (ver 5.1).
 - ✅ **Al salir, se lo saca automáticamente de los eventos `available` del grupo, pero no de los `closed`.** En esos eventos sigue siendo miembro, porque un evento cerrado ya tiene la gente y las compras definidas. La baja reutiliza la lógica de `unsubscribeFromEvent`, que también lo saca de las opciones que votó.
@@ -283,6 +283,8 @@ Middlewares nuevos, siguiendo el estilo de [src/middleware/middleware.ts](src/mi
 
 Ya figuran en `WORKTODO.md` §2.3: `getEventById`, `getMembersAndReceiptsInfo` y `getMembersAmount` responden sin `auth`. Con grupos dejan de ser algo "a revisar" y pasan a ser **requisito**: si siguen abiertos, cualquiera ve los eventos de cualquier grupo. Se resuelven con `auth` + `eventViewer`.
 
+✅ **Resuelto en el paso 4:** los tres usan `auth` + `eventViewer` ("miembro del grupo del evento **o** miembro del evento"), y `subscribeToAnEvent` exige ser miembro del grupo. Queda como registro lo que se hizo en el paso 1:
+
 ✅ **Paso 1 hecho (rama `t/groups`), con una regla provisoria hasta que exista `Event.group`:**
 - Los tres exigen `auth`.
 - `getEventById` lo ve cualquier usuario logueado, también si el evento es privado, porque hoy el link es la única forma de sumarse a un evento privado (§1).
@@ -367,7 +369,14 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 1. **Cerrar los endpoints abiertos** de 5.3 (`WORKTODO.md` §2.3). No depende de los grupos y se puede hacer ya. ✅ (PR #157)
 2. Modelo `Group` + generación del código + tests unitarios. ✅ (rama `t/groups-model`: `src/models/group.ts`, `src/modules/groups/groupCode.ts`, `GroupRepository.createWithUniqueCode`)
 3. Endpoints de grupo (crear, mis grupos, detalle, unirse, salir con borrado en cascada del grupo vacío, editar, makeAdmin, regenerateCode) + middlewares `groupMember`/`groupAdmin` + tests de integración. ✅ (rama `t/groups-model`). Salir aplica por ahora solo las reglas propias del grupo (único admin → 409, último miembro → se borra el grupo con sus portadas); las reglas que dependen de eventos (deudas, roles en `closed`/`readyforpayment`, baja de los `available`, borrar los eventos del grupo) se agregan en el paso 4 (hay un `TODO` en `GroupService.leave`).
-4. `Event.group` + cambios en `createEvent`, `subscribeToAnEvent`, `eventViewer` y los listados.
+4. `Event.group` + cambios en `createEvent`, `subscribeToAnEvent`, `eventViewer` y los listados. ✅ (rama `t/groups-model`):
+   - `Event.group` required, indexado e inmutable; `createEvent` exige `group` y que el organizador sea miembro.
+   - `subscribeToAnEvent` exige ser miembro del grupo; `getEventById`, `getMembersAndReceiptsInfo` y `getMembersAmount` usan `eventViewer` (grupo **o** evento).
+   - Los permisos de organizer exigen ser miembro actual del grupo (9e): `eventOrganizer`, `shoppingDesigneeOrEventOrganizer`, `optionManager` y ver costos de otros.
+   - Nuevo `GET /events/getGroupEvents/:group`.
+   - `leaveGroup` aplica todas las reglas de 4.4 (deudas, roles en `closed`/`readyforpayment`, baja de los `available`) y el borrado del grupo vacío incluye sus eventos (4.6), cada uno en una transacción.
+   - `unsubscribeFromEvent` libera los roles en eventos `available`.
+   - ⏸️ Sin cambios: `getEvents`, `getPublicAndPrivateEvents` y `getPublicEvents` siguen filtrando por `isPrivate` y muestran eventos de todos los grupos (5.2 y paso 8).
 5. Notificaciones por grupo + eliminar `deleteEvents()`.
 6. Portadas (subir, borrar y acceso en `getImage`).
 7. Invitaciones por mail, opción A.

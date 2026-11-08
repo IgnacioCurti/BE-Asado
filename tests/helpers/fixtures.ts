@@ -118,6 +118,7 @@ export type EventState =
 
 export interface EventFixture {
   _id: Id;
+  group: Id;
   title: string;
   datetime: string;
   description: string;
@@ -136,6 +137,11 @@ export interface EventFixture {
   penalizationStartDate?: string | null;
 }
 
+/**
+ * Sin `group`, crea un grupo nuevo con el organizador y los miembros, chef y
+ * designados del evento (todos pueden verlo). Para probar a alguien de afuera
+ * del grupo, alcanza con un usuario que no esté en el evento.
+ */
 export async function createEvent(
   overrides: Partial<Omit<EventFixture, "datetime" | "penalizationStartDate">> & {
     organizer: Id;
@@ -143,15 +149,39 @@ export async function createEvent(
     penalizationStartDate?: Date | string | null;
   }
 ): Promise<EventFixture> {
+  const members: Id[] = overrides.members ?? [overrides.organizer];
+  const group: Id =
+    overrides.group ??
+    (
+      await createGroup({
+        members: [
+          ...new Set(
+            [overrides.organizer, ...members, overrides.chef, ...(overrides.shoppingDesignee ?? [])]
+              .filter((id): id is Id => Boolean(id))
+              .map(String)
+          ),
+        ],
+      })
+    )._id;
   const doc = await Event.create({
     title: "Asado",
     description: "Asado de los viernes",
     datetime: new Date("2030-01-10T21:00:00.000Z"),
     memberLimit: 10,
-    members: [overrides.organizer],
+    members,
     ...overrides,
+    group,
   });
   return plain<EventFixture>(doc);
+}
+
+/** Suma usuarios a un grupo existente (p. ej. el que creó createEvent). */
+export async function addGroupMembers(groupId: Id, userIds: Id[]): Promise<void> {
+  await Group.updateOne({ _id: groupId }, { $addToSet: { members: { $each: userIds } } });
+}
+
+export async function removeGroupMember(groupId: Id, userId: Id): Promise<void> {
+  await Group.updateOne({ _id: groupId }, { $pull: { members: userId, admins: userId } });
 }
 
 /** Inserta un evento sin pasar por los defaults/validaciones del schema (simula datos legados). */

@@ -8,7 +8,9 @@ import {
   countRatings,
   countReminders,
   countTransferReceipts,
+  addGroupMembers,
   createEvent,
+  createGroup,
   createImage,
   createOption,
   createPurchaseReceipt,
@@ -22,6 +24,7 @@ import {
   findPurchaseReceipt,
   findReminders,
   newId,
+  removeGroupMember,
   remindersByType,
   simulateDeleteFailure,
   updateEvent,
@@ -31,8 +34,11 @@ import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 
 // Fechas: hora de Argentina guardada como UTC (ver README, "Date convention"); los tests corren con TZ=UTC.
 
-function eventBody(organizer: UserFixture, overrides: Record<string, unknown> = {}) {
+// Sin group en overrides, crea un grupo con el organizador como único miembro.
+async function eventBody(organizer: UserFixture, overrides: Record<string, unknown> = {}) {
+  const group = "group" in overrides ? undefined : (await createGroup({ members: [organizer._id] }))._id;
   return {
+    group,
     title: "Asado",
     description: "Asado de fin de año",
     datetime: "2030-01-10T21:00:00.000Z",
@@ -46,7 +52,7 @@ function eventBody(organizer: UserFixture, overrides: Record<string, unknown> = 
 describe("POST /api/events/createEvent", () => {
   it("crea el evento con defaults y responde 201", async () => {
     const organizer = await createUser();
-    const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+    const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
@@ -75,7 +81,7 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { isChef: true, isShoppingDesignee: true }));
+      .send(await eventBody(organizer, { isChef: true, isShoppingDesignee: true }));
     expect(res.body.chef).toBe(organizer._id);
     expect(res.body.shoppingDesignee).toEqual([organizer._id]);
   });
@@ -86,7 +92,7 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { chef: other._id }));
+      .send(await eventBody(organizer, { chef: other._id }));
     expect(res.body.chef).toBeNull();
   });
 
@@ -96,8 +102,59 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { shoppingDesignee: [other._id], isShoppingDesignee: true }));
+      .send(await eventBody(organizer, { shoppingDesignee: [other._id], isShoppingDesignee: true }));
     expect(res.body.shoppingDesignee).toEqual([organizer._id]);
+  });
+
+  describe("grupo del evento", () => {
+    it("el evento queda en el grupo del body", async () => {
+      const organizer = await createUser();
+      const group = await createGroup({ members: [organizer._id] });
+      const res = await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await eventBody(organizer, { group: group._id }));
+      expect(res.status).toBe(201);
+      expect(res.body.group).toBe(group._id);
+      expect((await findEvent(res.body._id))!.group).toBe(group._id);
+    });
+
+    it.each([
+      ["sin grupo", undefined, "The event's group is required."],
+      ["grupo mal formado", "abc", "Invalid ObjectID"],
+    ])("%s -> 400 y no crea nada", async (_case, group, message) => {
+      const organizer = await createUser();
+      const res = await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await eventBody(organizer, { group }));
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ message });
+      expect(await countEvents()).toBe(0);
+    });
+
+    it("grupo inexistente -> 404", async () => {
+      const organizer = await createUser();
+      const res = await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await eventBody(organizer, { group: newId() }));
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ message: "The group with the given ID does not exist." });
+      expect(await countEvents()).toBe(0);
+    });
+
+    it("en un grupo del que no es miembro -> 403", async () => {
+      const organizer = await createUser();
+      const other = await createUser();
+      const group = await createGroup({ members: [other._id] });
+      const res = await api()
+        .post("/api/events/createEvent")
+        .set(auth(organizer.token))
+        .send(await eventBody(organizer, { group: group._id }));
+      expect(res.status).toBe(403);
+      expect(await countEvents()).toBe(0);
+    });
   });
 
   it("el organizador se toma del token, no del body", async () => {
@@ -106,7 +163,14 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(caller.token))
-      .send(eventBody(someoneElse, { members: [caller._id], isChef: true, isShoppingDesignee: true }));
+      .send(
+        await eventBody(someoneElse, {
+          group: (await createGroup({ members: [caller._id, someoneElse._id] }))._id,
+          members: [caller._id],
+          isChef: true,
+          isShoppingDesignee: true,
+        })
+      );
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
       organizer: caller._id,
@@ -122,13 +186,13 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { members: [other._id, organizer._id] }));
+      .send(await eventBody(organizer, { members: [other._id, organizer._id] }));
     expect(res.body.members).toEqual([organizer._id]);
 
     const withoutMe = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { members: [other._id] }));
+      .send(await eventBody(organizer, { members: [other._id] }));
     expect(withoutMe.body.members).toEqual([]);
   });
 
@@ -137,7 +201,7 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { members: undefined }));
+      .send(await eventBody(organizer, { members: undefined }));
     expect(res.body.members).toEqual([]);
   });
 
@@ -146,7 +210,7 @@ describe("POST /api/events/createEvent", () => {
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+      .send(await eventBody(organizer, { isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
     expect(res.body).toMatchObject({ isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" });
   });
 
@@ -157,7 +221,7 @@ describe("POST /api/events/createEvent", () => {
       const res = await api()
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
-        .send(eventBody(organizer, { [field]: undefined }));
+        .send(await eventBody(organizer, { [field]: undefined }));
       expect(res.status).toBe(400);
       expect(res.body.message).toContain(field);
       expect(await countEvents()).toBe(0);
@@ -170,7 +234,7 @@ describe("POST /api/events/createEvent", () => {
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
       .send(
-        eventBody(organizer, {
+        await eventBody(organizer, {
           state: "finished",
           purchaseReceipts: [newId()],
           transferReceipts: [newId()],
@@ -192,7 +256,7 @@ describe("POST /api/events/createEvent", () => {
   describe("recordatorios", () => {
     it("crea un recordatorio eventStart 30 minutos antes del evento", async () => {
       const organizer = await createUser();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
       const reminders = await findReminders(res.body._id);
       expect(reminders).toEqual([
         expect.objectContaining({ type: "eventStart", datetime: "2030-01-10T20:30:00.000Z", event: res.body._id }),
@@ -202,7 +266,7 @@ describe("POST /api/events/createEvent", () => {
     it("un evento público crea además un recordatorio newEvent con fecha = ahora - 3 horas", async () => {
       const organizer = await createUser();
       const before = Date.now();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       const after = Date.now();
       const newEvent = (await remindersByType(res.body._id)).newEvent;
       expect(newEvent).toHaveLength(1);
@@ -216,7 +280,7 @@ describe("POST /api/events/createEvent", () => {
       const res = await api()
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
-        .send(eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+        .send(await eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
       const byType = await remindersByType(res.body._id);
       expect(byType.eventStart?.map((r) => r.datetime)).toEqual(["2030-01-10T20:30:00.000Z"]);
       expect(byType.penalizationStart?.map((r) => r.datetime)).toEqual(["2030-01-14T20:00:00.000Z"]);
@@ -228,11 +292,11 @@ describe("POST /api/events/createEvent", () => {
       const a = await api()
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
-        .send(eventBody(organizer, { penalization: 0, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+        .send(await eventBody(organizer, { penalization: 0, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
       const b = await api()
         .post("/api/events/createEvent")
         .set(auth(organizer.token))
-        .send(eventBody(organizer, { penalization: 100 }));
+        .send(await eventBody(organizer, { penalization: 100 }));
       expect(Object.keys(await remindersByType(a.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
       expect(Object.keys(await remindersByType(b.body._id)).sort()).toEqual(["eventStart", "newEvent"]);
     });
@@ -242,7 +306,7 @@ describe("POST /api/events/createEvent", () => {
     it("crear el evento no manda mails: los manda el siguiente reminderCheck", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       expect(res.status).toBe(201);
       expect(sentEmails).toHaveLength(0);
     });
@@ -253,7 +317,7 @@ describe("POST /api/events/createEvent", () => {
       const other = await createUser({ name: "Otro", notifications: { newEvent: true } as any });
       await createUser({ notifications: { newEvent: false } as any });
 
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
@@ -270,7 +334,7 @@ describe("POST /api/events/createEvent", () => {
     it("un evento privado no notifica a nadie", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer, { isPrivate: true }));
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
       await api().get("/api/cron/reminderCheck").expect(200);
       expect(sentEmails).toHaveLength(0);
     });
@@ -278,8 +342,8 @@ describe("POST /api/events/createEvent", () => {
     it("si el evento pasa a privado o se cancela antes del cron, no notifica", async () => {
       const organizer = await createUser();
       await createUser({ notifications: { newEvent: true } as any });
-      const a = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
-      const b = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const a = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
+      const b = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       await updateEvent(a.body._id, { isPrivate: true });
       await updateEvent(b.body._id, { state: "cancelled" });
 
@@ -294,7 +358,7 @@ describe("POST /api/events/createEvent", () => {
       await createUser({ notifications: { newEvent: true } as any });
       setBrevoResponseStatus(500);
 
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       await api().get("/api/cron/reminderCheck").expect(200);
 
       expect(res.status).toBe(201);
@@ -327,7 +391,7 @@ describe("POST /api/events/createEvent", () => {
       await seedFinished(organizer, 3, { state: "available", year: 2025 });
       // 6 públicos + el nuevo = 7 -> se borra 1 (el más viejo finalizado/cancelado)
 
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
 
       expect(await findEvent(f2020._id)).toBeNull();
       expect(await findEvent(f2021._id)).not.toBeNull();
@@ -340,7 +404,7 @@ describe("POST /api/events/createEvent", () => {
       await seedFinished(organizer, 5, { year: 2015 });
       await seedFinished(organizer, 3, { state: "available", year: 2025 });
       // 8 + 1 = 9 públicos -> borra 3
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
       expect(await countEvents()).toBe(6);
       expect(await findEventByTitle("finished-pub-0")).toBeNull();
       expect(await findEventByTitle("finished-pub-1")).toBeNull();
@@ -353,14 +417,14 @@ describe("POST /api/events/createEvent", () => {
       await seedFinished(organizer, 7, { state: "available" });
       await seedFinished(organizer, 1, { state: "closed" });
       await seedFinished(organizer, 1, { state: "readyforpayment" });
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
       expect(await countEvents()).toBe(10);
     });
 
     it("con 6 o menos eventos públicos no borra nada", async () => {
       const organizer = await createUser();
       await seedFinished(organizer, 5);
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
       expect(await countEvents()).toBe(6);
     });
 
@@ -369,7 +433,7 @@ describe("POST /api/events/createEvent", () => {
       const [privOld] = await seedFinished(organizer, 1, { isPrivate: true, year: 2000 });
       const pubs = await seedFinished(organizer, 6, { year: 2020 });
       // 6 públicos + 1 nuevo = 7 -> borra 1, el público finalizado más viejo
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
       expect(await findEvent(privOld._id)).not.toBeNull();
       expect(await findEvent(pubs[0]._id)).toBeNull();
       expect(await findEvent(pubs[1]._id)).not.toBeNull();
@@ -386,7 +450,7 @@ describe("POST /api/events/createEvent", () => {
       await createRating({ event: old._id, user: organizer._id, score: 5 });
       await createReminder({ event: old._id, type: "eventStart", datetime: new Date("2000-01-01") });
 
-      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(eventBody(organizer)).expect(201);
+      await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer)).expect(201);
 
       expect(await findEvent(old._id)).toBeNull();
       expect(await countPurchaseReceipts()).toBe(0);
@@ -403,6 +467,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id] });
+    await addGroupMembers(event.group, [me._id]);
     const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
     const r2 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 20, participants: [] });
 
@@ -417,10 +482,30 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     expect((await findPurchaseReceipt(r2._id))!.participants).toEqual([me._id]);
   });
 
-  it("[comportamiento actual] cualquiera puede unirse a un evento privado", async () => {
+  it("quien no es miembro del grupo del evento -> 403 y no se suma", async () => {
+    const organizer = await createUser();
+    const me = await createUser();
+    const event = await createEvent({ organizer: organizer._id, members: [organizer._id] });
+    const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "Access denied. The user is not a member of the event's group." });
+    expect((await findEvent(event._id))!.members).toEqual([organizer._id]);
+  });
+
+  it("ser miembro de otro grupo no alcanza", async () => {
+    const organizer = await createUser();
+    const me = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    await createGroup({ members: [organizer._id, me._id] });
+    const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("un miembro del grupo se une aunque el evento sea privado", async () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, isPrivate: true });
+    await addGroupMembers(event.group, [me._id]);
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(200);
   });
@@ -429,6 +514,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id], memberLimit: 1 });
+    await addGroupMembers(event.group, [me._id]);
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "The event is full." });
@@ -439,6 +525,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const a = await createUser();
     const b = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id], memberLimit: 2 });
+    await addGroupMembers(event.group, [a._id, b._id]);
 
     const results = await Promise.all([
       api().put(`/api/events/subscribeToAnEvent/${a._id}/${event._id}`).set(auth(a.token)),
@@ -453,6 +540,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id] });
+    await addGroupMembers(event.group, [me._id]);
     const r1 = await createPurchaseReceipt({ event: event._id, shoppingDesignee: organizer._id, amount: 10, participants: [organizer._id] });
 
     await Promise.all([
@@ -468,6 +556,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id], memberLimit: 1, state: "closed" });
+    await addGroupMembers(event.group, [me._id]);
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.body).toEqual({ message: "The event is full." });
   });
@@ -476,6 +565,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id, state });
+    await addGroupMembers(event.group, [me._id]);
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "The event is not available for users to join" });
@@ -500,6 +590,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({ organizer: organizer._id });
+    await addGroupMembers(event.group, [me._id]);
     await api().delete(`/api/users/deleteUser/${me._id}`).set(auth(me.token)).expect(200);
     const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(400);
@@ -511,6 +602,7 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     const me = await createUser();
     const other = await createUser();
     const event = await createEvent({ organizer: organizer._id });
+    await addGroupMembers(event.group, [me._id]);
     const res = await api().put(`/api/events/subscribeToAnEvent/${other._id}/${event._id}`).set(auth(me.token));
     expect(res.status).toBe(403);
   });
@@ -544,7 +636,22 @@ describe("PUT /api/events/unsubscribeFromEvent/:id/:event", () => {
     expect((await findOption(option._id))!.participants).toEqual([organizer._id]);
   });
 
-  it("[comportamiento actual] no lo quita de chef ni de shoppingDesignee", async () => {
+  it("con el evento available suelta sus roles de chef y comprador; los de otros quedan", async () => {
+    const organizer = await createUser();
+    const me = await createUser();
+    const event = await createEvent({
+      organizer: organizer._id,
+      members: [organizer._id, me._id],
+      chef: me._id,
+      shoppingDesignee: [organizer._id, me._id],
+    });
+    await api().put(`/api/events/unsubscribeFromEvent/${me._id}/${event._id}`).set(auth(me.token)).expect(200);
+    const stored = await findEvent(event._id);
+    expect(stored!.chef).toBeNull();
+    expect(stored!.shoppingDesignee).toEqual([organizer._id]);
+  });
+
+  it("en un evento finished los roles quedan congelados (historial)", async () => {
     const organizer = await createUser();
     const me = await createUser();
     const event = await createEvent({
@@ -552,6 +659,7 @@ describe("PUT /api/events/unsubscribeFromEvent/:id/:event", () => {
       members: [organizer._id, me._id],
       chef: me._id,
       shoppingDesignee: [me._id],
+      state: "finished",
     });
     await api().put(`/api/events/unsubscribeFromEvent/${me._id}/${event._id}`).set(auth(me.token)).expect(200);
     const stored = await findEvent(event._id);
@@ -741,6 +849,18 @@ describe("PUT /api/events/editEvent/:id", () => {
       ...overrides,
     };
   }
+
+  it("ignora group: el evento no cambia de grupo", async () => {
+    const organizer = await createUser();
+    const event = await createEvent({ organizer: organizer._id });
+    const otherGroup = await createGroup({ members: [organizer._id] });
+    const res = await api()
+      .put(`/api/events/editEvent/${event._id}`)
+      .set(auth(organizer.token))
+      .send(editBody({ group: otherGroup._id }));
+    expect(res.status).toBe(200);
+    expect((await findEvent(event._id))!.group).toBe(event.group);
+  });
 
   it("el organizador puede editar todos los campos", async () => {
     const organizer = await createUser();
@@ -932,7 +1052,7 @@ describe("PUT /api/events/editEvent/:id", () => {
     const created = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+      .send(await eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
     const id = created.body._id;
 
     await api()
@@ -1033,7 +1153,7 @@ describe("PUT /api/events/editEvent/:id", () => {
     const created = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { isShoppingDesignee: true, penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+      .send(await eventBody(organizer, { isShoppingDesignee: true, penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
     await api()
       .put(`/api/events/editEvent/${created.body._id}`)
       .set(auth(organizer.token))
@@ -1047,7 +1167,7 @@ describe("PUT /api/events/editEvent/:id", () => {
     const created = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
-      .send(eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
+      .send(await eventBody(organizer, { penalization: 100, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
     await api()
       .put(`/api/events/editEvent/${created.body._id}`)
       .set(auth(organizer.token))
@@ -1059,6 +1179,46 @@ describe("PUT /api/events/editEvent/:id", () => {
       "penalizationOneWeek",
       "penalizationStart",
     ]);
+  });
+});
+
+describe("organizador que salió del grupo (GROUPS_FEATURE §4.4.1)", () => {
+  async function setup() {
+    const organizer = await createUser();
+    const designee = await createUser();
+    const event = await createEvent({
+      organizer: organizer._id,
+      members: [organizer._id, designee._id],
+      shoppingDesignee: [designee._id],
+      state: "finished",
+    });
+    await removeGroupMember(event.group, organizer._id);
+    return { organizer, designee, event };
+  }
+
+  it("no puede borrar el evento", async () => {
+    const { organizer, event } = await setup();
+    const res = await api().delete(`/api/events/deleteEvent/${event._id}`).set(auth(organizer.token));
+    expect(res.status).toBe(403);
+    expect(await findEvent(event._id)).not.toBeNull();
+  });
+
+  it("no puede editarlo; el designado sí", async () => {
+    const { organizer, designee, event } = await setup();
+    const body = { title: "x", datetime: event.datetime, description: "d", memberLimit: 5, state: "finished" };
+    expect((await api().put(`/api/events/editEvent/${event._id}`).set(auth(organizer.token)).send(body)).status).toBe(403);
+    expect((await api().put(`/api/events/editEvent/${event._id}`).set(auth(designee.token)).send(body)).status).toBe(200);
+  });
+
+  it("no puede gestionar opciones", async () => {
+    const { organizer, event } = await setup();
+    const res = await api().post(`/api/options/createOption/${event._id}`).set(auth(organizer.token)).send({ title: "Vacío" });
+    expect(res.status).toBe(403);
+  });
+
+  it("sigue viendo el evento porque es miembro del evento", async () => {
+    const { organizer, event } = await setup();
+    expect((await api().get(`/api/events/getEventById/${event._id}`).set(auth(organizer.token))).status).toBe(200);
   });
 });
 

@@ -23,6 +23,7 @@ function setup() {
     paymentStatus: {},
     payments: {},
     mapper: new EventMapper(),
+    groups: { hasMember: vi.fn().mockResolvedValue(true) },
   };
   return { service: new EventService(deps as any), ...deps };
 }
@@ -40,6 +41,19 @@ function event(extra: Record<string, unknown> = {}) {
 }
 
 describe("EventService.subscribe", () => {
+  it("quien no es miembro del grupo del evento -> ForbiddenError y no escribe", async () => {
+    const { service, events, groups } = setup();
+    const ev = event({ group: id() });
+    const user = id();
+    events.findById.mockResolvedValue(ev);
+    groups.hasMember.mockResolvedValue(false);
+    await expect(service.subscribe(String(ev._id), String(user))).rejects.toEqual(
+      new ForbiddenError("Access denied. The user is not a member of the event's group.")
+    );
+    expect(groups.hasMember).toHaveBeenCalledWith(ev.group, user);
+    expect(events.addMemberIfAllowed).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["lleno", { memberLimit: 1, members: [id()] }, "The event is full."],
     ["no disponible", { state: "closed" }, "The event is not available for users to join"],

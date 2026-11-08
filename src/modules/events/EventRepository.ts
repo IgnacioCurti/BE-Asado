@@ -1,4 +1,5 @@
 import { BaseRepository } from "../../core/repositories/BaseRepository.js";
+import { runInTransaction } from "../../core/repositories/transaction.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { Event } from "../../models/event.js";
 import { Image } from "../../models/image.js";
@@ -167,6 +168,11 @@ export class EventRepository extends BaseRepository<IEvent> {
       .exec();
   }
 
+  // Mismo orden que findVisibleTo.
+  findByGroup(groupId: string): Promise<IEvent[]> {
+    return this.model.find({ group: groupId }).sort({ datetime: -1, _id: 1 }).exec();
+  }
+
   findPublicSummaries(): Promise<IPublicEventPreReduction[]> {
     return this.findSummaries({ isPrivate: { $ne: true } });
   }
@@ -275,38 +281,112 @@ export class EventRepository extends BaseRepository<IEvent> {
 
   // Borra los eventos con todo lo que cuelga de ellos (comprobantes y sus
   // imágenes, calificaciones, opciones y recordatorios) en una transacción:
-  // o se borra todo o no se borra nada. Requiere un replica set.
-  async deleteCascade(eventIds: mongoose.Types.ObjectId[]): Promise<void> {
+  // o se borra todo o no se borra nada. Con `session` se suma a una
+  // transacción en curso (p. ej. el borrado de un grupo); si no, abre una.
+  async deleteCascade(
+    eventIds: mongoose.Types.ObjectId[],
+    session?: mongoose.ClientSession
+  ): Promise<void> {
     if (eventIds.length === 0) return;
-    const session: mongoose.ClientSession = await mongoose.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const events = await this.model
-          .find({ _id: { $in: eventIds } })
-          .select("transferReceipts purchaseReceipts ratings options")
-          .session(session)
-          .exec();
-        const ids = (field: "transferReceipts" | "purchaseReceipts" | "ratings" | "options") =>
-          events.flatMap((event) => event[field] as mongoose.Types.ObjectId[]);
-        const transferIds = ids("transferReceipts");
-        const purchaseIds = ids("purchaseReceipts");
-        const receipts = [
-          ...(await TransferReceipt.find({ _id: { $in: transferIds } }).select("image").session(session).exec()),
-          ...(await PurchaseReceipt.find({ _id: { $in: purchaseIds } }).select("image").session(session).exec()),
-        ];
-        const imageIds = receipts.map((receipt) => receipt.image).filter(Boolean);
+    if (!session) return runInTransaction((own) => this.deleteCascade(eventIds, own));
 
-        await Image.deleteMany({ _id: { $in: imageIds } }).session(session).exec();
-        await TransferReceipt.deleteMany({ _id: { $in: transferIds } }).session(session).exec();
-        await PurchaseReceipt.deleteMany({ _id: { $in: purchaseIds } }).session(session).exec();
-        await Rating.deleteMany({ _id: { $in: ids("ratings") } }).session(session).exec();
-        await Option.deleteMany({ _id: { $in: ids("options") } }).session(session).exec();
-        await Reminder.deleteMany({ event: { $in: eventIds } }).session(session).exec();
-        await this.model.deleteMany({ _id: { $in: eventIds } }).session(session).exec();
-      });
-    } finally {
-      await session.endSession();
-    }
+    const events = await this.model
+      .find({ _id: { $in: eventIds } })
+      .select("transferReceipts purchaseReceipts ratings options")
+      .session(session)
+      .exec();
+    const ids = (field: "transferReceipts" | "purchaseReceipts" | "ratings" | "options") =>
+      events.flatMap((event) => event[field] as mongoose.Types.ObjectId[]);
+    const transferIds = ids("transferReceipts");
+    const purchaseIds = ids("purchaseReceipts");
+    const receipts = [
+      ...(await TransferReceipt.find({ _id: { $in: transferIds } }).select("image").session(session).exec()),
+      ...(await PurchaseReceipt.find({ _id: { $in: purchaseIds } }).select("image").session(session).exec()),
+    ];
+    const imageIds = receipts.map((receipt) => receipt.image).filter(Boolean);
+
+    await Image.deleteMany({ _id: { $in: imageIds } }).session(session).exec();
+    await TransferReceipt.deleteMany({ _id: { $in: transferIds } }).session(session).exec();
+    await PurchaseReceipt.deleteMany({ _id: { $in: purchaseIds } }).session(session).exec();
+    await Rating.deleteMany({ _id: { $in: ids("ratings") } }).session(session).exec();
+    await Option.deleteMany({ _id: { $in: ids("options") } }).session(session).exec();
+    await Reminder.deleteMany({ event: { $in: eventIds } }).session(session).exec();
+    await this.model.deleteMany({ _id: { $in: eventIds } }).session(session).exec();
+  }
+
+  findIdsByGroup(
+    groupId: mongoose.Types.ObjectId,
+    session?: mongoose.ClientSession
+  ): Promise<mongoose.Types.ObjectId[]> {
+    return this.model
+      .find({ group: groupId })
+      .session(session ?? null)
+      .distinct("_id")
+      .exec() as Promise<mongoose.Types.ObjectId[]>;
+  }
+
+  // Eventos closed/readyforpayment del grupo donde el usuario es miembro o
+  // tiene un rol: los que pueden impedir que salga del grupo (§4.4).
+  findActiveInGroupInvolving(
+    groupId: mongoose.Types.ObjectId,
+    userId: mongoose.Types.ObjectId
+  ): Promise<IEvent[]> {
+    return this.model
+      .find({
+        group: groupId,
+        state: { $in: ["closed", "readyforpayment"] },
+        $or: [{ members: userId }, { chef: userId }, { shoppingDesignee: userId }],
+      })
+      .select("state members chef shoppingDesignee")
+      .exec();
+  }
+
+  // Baja del usuario de los eventos available del grupo, como unsubscribe:
+  // sale de members, de sus roles, de las opciones y de los comprobantes de
+  // compra. Los eventos en otros estados no se tocan (§4.4).
+  async removeUserFromAvailableInGroup(
+    groupId: mongoose.Types.ObjectId,
+    userId: mongoose.Types.ObjectId,
+    session: mongoose.ClientSession
+  ): Promise<void> {
+    const filter: FilterQuery<IEvent> = {
+      group: groupId,
+      state: "available",
+      $or: [{ members: userId }, { chef: userId }, { shoppingDesignee: userId }],
+    };
+    const events = await this.model
+      .find(filter)
+      .select("options purchaseReceipts")
+      .session(session)
+      .exec();
+    if (events.length === 0) return;
+    const ids = events.map((event) => event._id);
+    const optionIds = events.flatMap((event) => event.options);
+    const receiptIds = events.flatMap((event) => event.purchaseReceipts);
+
+    await this.model
+      .updateMany(
+        { _id: { $in: ids }, state: "available", chef: userId },
+        { $set: { chef: null } }
+      )
+      .session(session)
+      .exec();
+    await this.model
+      .updateMany(
+        { _id: { $in: ids }, state: "available" },
+        { $pull: { members: userId, shoppingDesignee: userId } }
+      )
+      .session(session)
+      .exec();
+    await Option.updateMany({ _id: { $in: optionIds } }, { $pull: { participants: userId } })
+      .session(session)
+      .exec();
+    await PurchaseReceipt.updateMany(
+      { _id: { $in: receiptIds } },
+      { $pull: { participants: userId } }
+    )
+      .session(session)
+      .exec();
   }
 
   findByIdWithMembers(id: string): Promise<IEventWithMembers | null> {
