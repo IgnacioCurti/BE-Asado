@@ -11,8 +11,6 @@ function setup() {
     events: {
       build: vi.fn((fields: any) => ({ _id: id(), isPrivate: false, ...fields })),
       save: vi.fn(async (doc: any) => doc),
-      countPublic: vi.fn().mockResolvedValue(0),
-      findPublicEndedOldestFirst: vi.fn().mockResolvedValue([]),
       deleteCascade: vi.fn(),
       findById: vi.fn(),
     },
@@ -110,45 +108,21 @@ describe("EventService.create", () => {
     expect(events.save).not.toHaveBeenCalled();
   });
 
-  it("evento público: programa el aviso de evento nuevo y los recordatorios", async () => {
+  it("programa siempre el aviso de evento nuevo y los recordatorios", async () => {
     const ctx = setup();
     const organizer = String(id());
     const group = String(inGroup(ctx, organizer));
     const { service, reminders } = ctx;
-    const event = await service.create(organizer, { group, title: "Asado" });
+    const event = await service.create(organizer, { group, title: "Asado", isPrivate: true });
     expect(reminders.scheduleNewEvent).toHaveBeenCalledWith(event._id);
     expect(reminders.syncWithEvent).toHaveBeenCalledWith(event);
   });
 
-  it("evento privado: no avisa a los suscriptos", async () => {
-    const ctx = setup();
-    const organizer = String(id());
-    const group = String(inGroup(ctx, organizer));
-    const { service, reminders } = ctx;
-    await service.create(organizer, { group, title: "Asado", isPrivate: true });
-    expect(reminders.scheduleNewEvent).not.toHaveBeenCalled();
-  });
-
-  it("con más de 6 eventos públicos borra los públicos terminados más viejos que sobran", async () => {
+  it("no borra eventos viejos al crear uno (se eliminó deleteEvents)", async () => {
     const ctx = setup();
     const { service, events } = ctx;
-    const ended = [{ _id: id() }, { _id: id() }, { _id: id() }];
-    events.countPublic.mockResolvedValue(8);
-    events.findPublicEndedOldestFirst.mockResolvedValue(ended);
-
     const organizer = String(id());
     await service.create(organizer, { group: String(inGroup(ctx, organizer)), title: "Asado" });
-
-    expect(events.deleteCascade).toHaveBeenCalledWith([ended[0]._id, ended[1]._id]);
-  });
-
-  it("con 6 o menos no borra nada", async () => {
-    const ctx = setup();
-    const { service, events } = ctx;
-    events.countPublic.mockResolvedValue(6);
-    const organizer = String(id());
-    await service.create(organizer, { group: String(inGroup(ctx, organizer)), title: "Asado" });
-    expect(events.findPublicEndedOldestFirst).not.toHaveBeenCalled();
     expect(events.deleteCascade).not.toHaveBeenCalled();
   });
 });

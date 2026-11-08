@@ -1,6 +1,7 @@
-import { IEvent, IEventWithMembers, IReminder, IUser } from "../../models/interfaces.js";
+import { IEvent, IEventWithMembers, IGroup, IReminder, IUser } from "../../models/interfaces.js";
 import { nowArgentina } from "../../utils/dates.js";
 import { EventRepository } from "../events/EventRepository.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { ReminderRepository } from "./ReminderRepository.js";
@@ -8,7 +9,7 @@ import { ReminderRepository } from "./ReminderRepository.js";
 type SendEmail = (email: string, subject: string, name: string, html: string) => Promise<void>;
 
 export interface NotificationTemplates {
-  newEvent: (eventId: string) => string;
+  newEvent: (eventId: string, groupName: string) => string;
   eventStart: (eventId: string) => string;
   penalizationStart: (eventId: string, penalization: number) => string;
   penalizationOneWeek: (eventId: string, penalization: number) => string;
@@ -16,7 +17,8 @@ export interface NotificationTemplates {
 
 export interface NotificationServiceDeps {
   events: Pick<EventRepository, "findById" | "findByIdWithMembers">;
-  users: Pick<UserRepository, "findWithNotificationEnabled">;
+  groups: Pick<GroupRepository, "findById">;
+  users: Pick<UserRepository, "findByIdsWithNotificationEnabled">;
   reminders: Pick<ReminderRepository, "findDue" | "deleteById">;
   debtors: Pick<TransferReceiptService, "getDebtors">;
   sendEmail: SendEmail;
@@ -64,14 +66,20 @@ export class NotificationService {
     return reminders;
   }
 
-  // A los usuarios suscriptos a eventos nuevos, si el evento sigue público y activo.
+  // A los miembros del grupo del evento con el aviso activado, salvo el
+  // organizador, si el evento sigue activo. La lista de miembros se lee en esta
+  // corrida del cron: incluye a quien entró al grupo después de crear el evento.
   async notifyNewEvent(eventId: string): Promise<void> {
     await this.logFailures("Error notifying new event", async () => {
       const event: IEvent = await this.getEvent(eventId);
-      // El evento pudo cambiar entre su creación y esta corrida del cron.
-      if (event.isPrivate || event.state === "cancelled") return;
-      const users: IUser[] = await this.deps.users.findWithNotificationEnabled("newEvent");
-      const message: string = this.deps.templates.newEvent(eventId);
+      // El evento pudo cancelarse entre su creación y esta corrida del cron.
+      if (event.state === "cancelled") return;
+      const group: IGroup | null = await this.deps.groups.findById(String(event.group));
+      if (!group) throw new Error(`Group with ID ${event.group} not found.`);
+      const recipients = group.members.filter((member) => !member.equals(event.organizer));
+      if (recipients.length === 0) return;
+      const users: IUser[] = await this.deps.users.findByIdsWithNotificationEnabled(recipients, "newEvent");
+      const message: string = this.deps.templates.newEvent(eventId, group.name);
       for (const user of users)
         await this.notifyUser(user, "FoodSpot | Nuevo evento", message, `new event ${eventId}`);
     });
