@@ -678,6 +678,8 @@ Se eliminó: antes, al crear un evento, si había más de 6 eventos públicos se
 
 **Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** sí · **Origen:** GROUPS_FEATURE §4.3 (opción A), paso 7
 
+> **Reemplazado por §34:** el mail ya no lleva el código ni el link `/join/<CODE>`, sino un link con token (`/invitation/<token>`). El contrato de `inviteToGroup` y su respuesta no cambian.
+
 #### Endpoint nuevo (solo admins del grupo)
 `POST /api/groups/inviteToGroup/:group` con body `{ emails: string[] }`.
 
@@ -768,3 +770,44 @@ No es un cambio de la API: el back no cambió. El back usa **`cancelled`** (dos 
 - Cambiar el valor del enum a `CANCELLED = 'cancelled'` (y el de `EventStatus` en `useEventHome.tsx`).
 - Reemplazar los strings sueltos (`'canceled'`) por el enum.
 - El resto de los estados del enum coincide con el back (`available`, `closed`, `readyforpayment`, `finished`). `full` e `incompleted` no existen en el back: son estados que calcula el front.
+
+---
+
+### 34. Grupos: invitaciones con token (opción B)
+
+**Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** sí · **Origen:** GROUPS_FEATURE §4.3 (opción B), paso 9
+
+Las invitaciones por mail pasan a ser personales: cada una tiene un token de un solo uso, vence a los **7 días** y solo la puede aceptar un usuario logueado **con el mismo mail** al que se mandó. El código del grupo (`joinGroup`) sigue funcionando igual.
+
+#### `POST /api/groups/inviteToGroup/:group` (cambia el mail, no el contrato)
+- Mismo body `{ emails: [] }`, mismas validaciones y misma respuesta `{ sent, failed, alreadyMembers }` (§31).
+- El mail ahora lleva el link **`https://food-spot.vercel.app/invitation/<token>`** y ya no el código del grupo.
+- Reinvitar a un mail con invitación pendiente la renueva: le llega un link nuevo y el anterior deja de servir.
+- **Nuevo 409** `"A group can have at most 50 pending invitations. Revoke some first."`.
+- Regenerar el código del grupo ya no invalida las invitaciones.
+
+#### Endpoint nuevo: `PUT /api/groups/acceptInvitation` (requiere token de sesión)
+Body `{ token }` (el que viene en el link). Responde **200** con el detalle del grupo, igual que `joinGroup`.
+
+| Caso | Respuesta |
+|--|--|
+| Sin `token` | **400** `"The invitation token is required."` |
+| Token inexistente, ya usado o revocado | **404** `"The invitation is not valid."` |
+| Vencida | **409** `"The invitation has expired. Ask an admin to invite you again."` |
+| El usuario logueado tiene otro mail | **403** `"The invitation was sent to another email."` |
+| Ya es miembro (p. ej. entró con el código) | **409** `"The user is already a member of the group."` (la invitación se da por usada) |
+| Ya está en 100 grupos / el grupo tiene 200 miembros | **409** (mismos mensajes que `joinGroup`); la invitación sigue pendiente |
+
+#### Endpoints nuevos para admins
+| Endpoint | Respuesta |
+|--|--|
+| `GET /api/groups/getInvitations/:group` | **200** `[{ _id, email, invitedBy: { _id, name, lastName }, expiresAt, createdAt }]`: pendientes y vigentes, más nuevas primero. |
+| `DELETE /api/groups/revokeInvitation/:group/:invitation` | **200** con la invitación revocada. **404** si no es una pendiente de ese grupo, **400** id mal formado. |
+
+No admin / no miembro / grupo inexistente: **403** / **403** / **404**, como el resto de los endpoints de admin.
+
+#### Cómo adaptar el front (probable)
+- Ruta nueva **`/invitation/[token]`**: si no hay sesión, mandar a login o registro conservando el token (avisando que tiene que usar el mail invitado); después llamar a `acceptInvitation` y llevar al grupo.
+- Mostrar el **403** de mail distinto con un mensaje claro ("esta invitación es para otro mail").
+- La ruta `/join/<CODE>` sigue sirviendo para compartir el código a mano, pero los mails ya no la usan.
+- Pantalla de admin: listar con `getInvitations` y permitir revocar.

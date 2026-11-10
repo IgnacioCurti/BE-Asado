@@ -6,6 +6,7 @@ import { GroupAccessPolicy } from "./GroupAccessPolicy.js";
 import { sendEmail } from "../../utils/utils.js";
 import { groupInvitationTemplate } from "../../utils/templates.js";
 import { UserRepository } from "../users/UserRepository.js";
+import { InvitationRepository } from "./InvitationRepository.js";
 import { GroupController } from "./GroupController.js";
 import { GroupInvitationService } from "./GroupInvitationService.js";
 import { GroupRepository } from "./GroupRepository.js";
@@ -23,6 +24,8 @@ export const groupController = new GroupController(
   new GroupInvitationService({
     groups: groupRepository,
     users: new UserRepository(),
+    invitations: new InvitationRepository(),
+    transaction: runInTransaction,
     sendEmail,
     template: groupInvitationTemplate,
   })

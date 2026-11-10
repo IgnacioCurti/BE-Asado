@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { BaseRepository } from "../../core/repositories/BaseRepository.js";
 import { Group, GROUP_LIMITS } from "../../models/group.js";
 import { Image } from "../../models/image.js";
+import { Invitation } from "../../models/invitation.js";
 import { IGroup, IUser } from "../../models/interfaces.js";
 import { generateGroupCode } from "./groupCode.js";
 
@@ -84,6 +85,25 @@ export class GroupRepository extends BaseRepository<IGroup> {
       .exec();
   }
 
+  // Igual que addMemberByCode, para quien entra con una invitación.
+  addMemberById(
+    groupId: mongoose.Types.ObjectId,
+    userId: mongoose.Types.ObjectId,
+    session?: mongoose.ClientSession
+  ): Promise<IGroup | null> {
+    return this.model
+      .findOneAndUpdate(
+        {
+          _id: groupId,
+          members: { $ne: userId },
+          [`members.${GROUP_LIMITS.MAX_MEMBERS - 1}`]: { $exists: false },
+        },
+        { $push: { members: userId } },
+        { new: true, session }
+      )
+      .exec();
+  }
+
   // Hace admin a un miembro (idempotente). null si no es miembro.
   addAdmin(groupId: string, userId: mongoose.Types.ObjectId): Promise<IGroup | null> {
     return this.model
@@ -149,7 +169,7 @@ export class GroupRepository extends BaseRepository<IGroup> {
   }
 
   // Borra el grupo solo si el usuario es su único miembro, junto con sus
-  // portadas (§4.6). Corre dentro de la transacción de quien llama, que
+  // portadas e invitaciones (§4.6). Corre dentro de la transacción de quien llama, que
   // borra también los eventos del grupo. true si lo borró.
   async deleteIfOnlyMember(
     groupId: mongoose.Types.ObjectId,
@@ -160,7 +180,10 @@ export class GroupRepository extends BaseRepository<IGroup> {
       .findOneAndDelete({ _id: groupId, members: [userId] })
       .session(session)
       .exec();
-    if (group) await Image.deleteMany({ _id: { $in: group.coverPhotos } }).session(session).exec();
+    if (group) {
+      await Image.deleteMany({ _id: { $in: group.coverPhotos } }).session(session).exec();
+      await Invitation.deleteMany({ group: group._id }).session(session).exec();
+    }
     return Boolean(group);
   }
 

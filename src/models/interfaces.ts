@@ -142,6 +142,21 @@ export interface IGroup extends Document {
   createdAt: Date;
 }
 
+export type InvitationStatus = "pending" | "accepted" | "revoked";
+
+export interface IInvitation extends Document {
+  _id: mongoose.Types.ObjectId;
+  group: mongoose.Types.ObjectId;
+  email: string;
+  invitedBy: mongoose.Types.ObjectId;
+  tokenHash: string;
+  expiresAt: Date;
+  status: InvitationStatus;
+  acceptedBy?: mongoose.Types.ObjectId | null;
+  acceptedAt?: Date | null;
+  createdAt: Date;
+}
+
 export interface IEvent extends Document {
   _id: mongoose.Types.ObjectId;
   group: mongoose.Types.ObjectId;

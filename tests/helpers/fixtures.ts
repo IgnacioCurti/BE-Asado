@@ -19,6 +19,7 @@ import { Option } from "../../src/models/option.js";
 import { Reminder } from "../../src/models/reminder.js";
 import { Image } from "../../src/models/image.js";
 import { Group } from "../../src/models/group.js";
+import { Invitation } from "../../src/models/invitation.js";
 
 export const JWT_SECRET: string = process.env.JWTPRIVATEKEY as string;
 export const DEFAULT_PASSWORD: string = "Secret123!";
@@ -451,6 +452,16 @@ export async function findGroup(id: Id): Promise<GroupFixture | null> {
 
 export async function countGroups(): Promise<number> {
   return Group.countDocuments();
+}
+
+export async function findInvitations(groupId: Id): Promise<Record<string, any>[]> {
+  const docs = await Invitation.find({ group: groupId }).sort({ createdAt: 1, _id: 1 }).lean();
+  return docs.map((doc) => plain<Record<string, any>>(doc));
+}
+
+/** Cambia campos de una invitación (p. ej. expiresAt) salteando la lógica del servicio. */
+export async function updateInvitation(id: Id, fields: Record<string, unknown>): Promise<void> {
+  await Invitation.updateOne({ _id: id }, { $set: fields });
 }
 
 /** Inserta n grupos donde el usuario es miembro (para probar el límite por usuario). */
