@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   eventStartTemplate,
+  groupInvitationTemplate,
   newEventTemplate,
   passwordRecoveryTemplate,
   penalizationOneWeekTemplate,
@@ -80,5 +81,26 @@ describe.each([
 
   it("muestra 'null' si el evento no tiene penalización", () => {
     expect(template(EVENT_ID, null as unknown as number)).toContain("$null por día");
+  });
+});
+
+describe("groupInvitationTemplate", () => {
+  it("incluye el link con el código, el código, el grupo y quién invita", () => {
+    const html = groupInvitationTemplate("Amigos", "Ana Pérez", "K7PX2MQA");
+    expect(html).toContain('href="https://food-spot.vercel.app/join/K7PX2MQA"');
+    expect(html).toContain('<span class="code">K7PX2MQA</span>');
+    expect(html).toContain("<strong>Ana Pérez</strong> te invitó");
+    expect(html).toContain("<strong>Amigos</strong>");
+    expect(html).toContain(`src="${DEFAULT_LOGO}"`);
+  });
+
+  it("escapa el nombre del grupo y el de quien invita", () => {
+    const html = groupInvitationTemplate("<b>g</b>", "<i>x</i>", "K7PX2MQA");
+    expect(html).toContain("&lt;b&gt;g&lt;/b&gt;");
+    expect(html).toContain("&lt;i&gt;x&lt;/i&gt;");
+  });
+
+  it("sin nombre de quien invita usa un texto genérico", () => {
+    expect(groupInvitationTemplate("Amigos", "", "K7PX2MQA")).toContain("Te invitaron a unirte");
   });
 });

@@ -16,6 +16,10 @@ export class UserRepository extends BaseRepository<IUser> {
     return this.model.findOne({ email }).exec();
   }
 
+  findByEmails(emails: string[]): Promise<IUser[]> {
+    return this.model.find({ email: { $in: emails } }).exec();
+  }
+
   // Campos sensibles que nunca salen en las respuestas de usuarios. También se
   // usa al poblar usuarios desde otros documentos (eventos, comprobantes).
   static readonly SAFE_PROJECTION: string =

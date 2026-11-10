@@ -1,10 +1,14 @@
 import { Response } from "express";
 import { STATUS_CODES } from "../../constants/httpStatusCode.js";
 import { IRequestWithUser } from "../../models/interfaces.js";
+import { GroupInvitationService } from "./GroupInvitationService.js";
 import { GroupService } from "./GroupService.js";
 
 export class GroupController {
-  constructor(private readonly service: GroupService) {}
+  constructor(
+    private readonly service: GroupService,
+    private readonly invitations: GroupInvitationService
+  ) {}
 
   create = async (req: IRequestWithUser, res: Response): Promise<Response> => {
     return res
@@ -58,5 +62,11 @@ export class GroupController {
     return res
       .status(STATUS_CODES.OK)
       .json(await this.service.deleteCoverPhoto(req.params.group, req.params.image));
+  };
+
+  invite = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.invitations.invite(req.params.group, req.user._id, req.body?.emails));
   };
 }

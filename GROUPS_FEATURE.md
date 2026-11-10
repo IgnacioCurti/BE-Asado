@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 6 del plan (sección 9).
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 7 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -384,7 +384,10 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 6. Portadas (subir, borrar y acceso en `getImage`). ✅ (rama `t/groups-model`):
    - `POST /groups/addCoverPhoto/:group` y `DELETE /groups/deleteCoverPhoto/:group/:image` (admins). El límite de 5 se vuelve a verificar al escribir; si se llenó en el medio, se borra la imagen recién guardada.
    - `getImage`: una portada de grupo solo la ven los miembros del grupo (403 para el resto).
-7. Invitaciones por mail, opción A.
+7. Invitaciones por mail, opción A. ✅ (rama `t/groups-model`):
+   - `POST /groups/inviteToGroup/:group` (admins), body `{ emails: [] }`: hasta 20 por pedido, normalizados a minúsculas y sin repetidos; cualquier mail inválido → 400.
+   - El mail lleva el link `https://food-spot.vercel.app/join/<CODE>`, el código, el nombre del grupo y quién invita.
+   - No se le manda a quien ya es miembro. Un envío fallido no corta el resto. Responde `{ sent, failed, alreadyMembers }`.
 8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7).
 9. Invitaciones por mail, opción B.
 10. `FRONTEND_CHANGES.md` actualizado en cada paso.

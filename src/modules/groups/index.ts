@@ -3,7 +3,11 @@ import { EventRepository } from "../events/EventRepository.js";
 import { imageService } from "../images/index.js";
 import { transferReceiptService } from "../transferReceipts/index.js";
 import { GroupAccessPolicy } from "./GroupAccessPolicy.js";
+import { sendEmail } from "../../utils/utils.js";
+import { groupInvitationTemplate } from "../../utils/templates.js";
+import { UserRepository } from "../users/UserRepository.js";
 import { GroupController } from "./GroupController.js";
+import { GroupInvitationService } from "./GroupInvitationService.js";
 import { GroupRepository } from "./GroupRepository.js";
 import { GroupService } from "./GroupService.js";
 
@@ -15,7 +19,13 @@ export const groupController = new GroupController(
     events: new EventRepository(),
     debtors: transferReceiptService,
     transaction: runInTransaction,
-  }, imageService)
+  }, imageService),
+  new GroupInvitationService({
+    groups: groupRepository,
+    users: new UserRepository(),
+    sendEmail,
+    template: groupInvitationTemplate,
+  })
 );
 export const groupAccessPolicy = new GroupAccessPolicy(groupRepository);
 export { GroupService };
