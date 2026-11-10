@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 7 del plan (sección 9).
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 8 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -277,7 +277,7 @@ Middlewares nuevos, siguiendo el estilo de [src/middleware/middleware.ts](src/mi
 ✅ **Desaparecen.** Todo evento es de un grupo y solo lo ve ese grupo.
 
 - Se eliminan `isPrivate` y `GET /events/getPublicEvents`.
-- ⏸️ `getEvents` y `getPublicAndPrivateEvents`: **en espera**. La opción preferida es reemplazarlos por un único `getMyEvents` ("eventos de todos mis grupos", por ejemplo para una home que mezcle grupos) y eliminar los otros dos.
+- ✅ `getEvents` y `getPublicAndPrivateEvents` se reemplazan por un único `getMyEvents` ("eventos de todos mis grupos", para una home que mezcle grupos). Hecho en el paso 8.
 
 ### 5.3 Endpoints abiertos que los grupos dejan sin efecto
 
@@ -388,7 +388,10 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
    - `POST /groups/inviteToGroup/:group` (admins), body `{ emails: [] }`: hasta 20 por pedido, normalizados a minúsculas y sin repetidos; cualquier mail inválido → 400.
    - El mail lleva el link `https://food-spot.vercel.app/join/<CODE>`, el código, el nombre del grupo y quién invita.
    - No se le manda a quien ya es miembro. Un envío fallido no corta el resto. Responde `{ sent, failed, alreadyMembers }`.
-8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7).
+8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7). ✅ (rama `t/groups-model`):
+   - Se eliminan `isPrivate` (schema, alta y edición), `getPublicEvents`, `getEvents` y `getPublicAndPrivateEvents`.
+   - Nuevo `GET /events/getMyEvents`: eventos de todos los grupos del usuario, en el formato resumido de `getPublicAndPrivateEvents` más `group: { _id, name }`.
+   - `EventMapper` ya no completa valores por defecto para eventos viejos.
 9. Invitaciones por mail, opción B.
 10. `FRONTEND_CHANGES.md` actualizado en cada paso.
 
@@ -423,4 +426,4 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 | 9q | Eliminar cuenta: no se ofrece por ahora. Flujo deseado: bloquear si es único admin con otros miembros | ⏸️ en espera |
 | 10 | Sin migración: la base de datos se reinicia por completo | ✅ 2026-10-27 |
 | 11 | Eliminar `deleteEvents()` | ✅ 2026-10-27 |
-| 12 | Reemplazar `getEvents` / `getPublicAndPrivateEvents` por `getMyEvents` | ⏸️ en espera (opción preferida) |
+| 12 | Reemplazar `getEvents` / `getPublicAndPrivateEvents` por `getMyEvents` | ✅ 2026-11-10 (paso 8) |

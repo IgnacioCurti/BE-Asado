@@ -1,15 +1,14 @@
 import { IPublicEvent, IPublicEventPreReduction } from "../../models/interfaces.js";
 
-// Vista pública de un evento: sin organizador, members como cantidad, chef
-// como nombre y calificaciones como promedio y cantidad.
-// Los valores por defecto cubren eventos viejos sin ratings, isPrivate o
-// penalization (backwards compatibility; sacar cuando no queden eventos así).
+// Vista resumida de un evento: sin organizador, members como cantidad, chef
+// como nombre, el grupo como { _id, name } y las calificaciones como promedio
+// y cantidad.
 export class EventMapper {
   toPublic(event: IPublicEventPreReduction): IPublicEvent {
-    const ratings = event.ratings ?? [];
-    const totalScore: number = ratings.reduce((sum, rating) => sum + rating.score, 0);
+    const totalScore: number = event.ratings.reduce((sum, rating) => sum + rating.score, 0);
     return {
       _id: event._id,
+      group: { _id: event.group._id, name: event.group.name },
       title: event.title,
       datetime: event.datetime,
       description: event.description,
@@ -19,12 +18,11 @@ export class EventMapper {
       memberLimit: event.memberLimit,
       members: event.members.length,
       ratings: {
-        avgScore: ratings.length > 0 ? totalScore / ratings.length : 0,
-        ratingsAmount: ratings.length,
+        avgScore: event.ratings.length > 0 ? totalScore / event.ratings.length : 0,
+        ratingsAmount: event.ratings.length,
       },
-      isPrivate: event.isPrivate ? event.isPrivate : false,
-      penalization: event.penalization ? event.penalization : null,
-      penalizationStartDate: event.penalizationStartDate ? event.penalizationStartDate : null,
+      penalization: event.penalization ?? null,
+      penalizationStartDate: event.penalizationStartDate ?? null,
     };
   }
 

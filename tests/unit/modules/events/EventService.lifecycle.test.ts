@@ -9,7 +9,7 @@ const id = () => new mongoose.Types.ObjectId();
 function setup() {
   const deps = {
     events: {
-      build: vi.fn((fields: any) => ({ _id: id(), isPrivate: false, ...fields })),
+      build: vi.fn((fields: any) => ({ _id: id(), ...fields })),
       save: vi.fn(async (doc: any) => doc),
       deleteCascade: vi.fn(),
       findById: vi.fn(),
@@ -108,12 +108,12 @@ describe("EventService.create", () => {
     expect(events.save).not.toHaveBeenCalled();
   });
 
-  it("programa siempre el aviso de evento nuevo y los recordatorios", async () => {
+  it("programa el aviso de evento nuevo y los recordatorios", async () => {
     const ctx = setup();
     const organizer = String(id());
     const group = String(inGroup(ctx, organizer));
     const { service, reminders } = ctx;
-    const event = await service.create(organizer, { group, title: "Asado", isPrivate: true });
+    const event = await service.create(organizer, { group, title: "Asado" });
     expect(reminders.scheduleNewEvent).toHaveBeenCalledWith(event._id);
     expect(reminders.syncWithEvent).toHaveBeenCalledWith(event);
   });

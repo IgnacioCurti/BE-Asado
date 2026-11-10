@@ -8,22 +8,21 @@ const id = () => new mongoose.Types.ObjectId();
 
 function setup() {
   const events = {
-    findVisibleTo: vi.fn(),
-    findPublicSummaries: vi.fn(),
-    findSummariesVisibleTo: vi.fn(),
+    findSummariesInGroups: vi.fn(),
     findByIdWithDetails: vi.fn(),
     findByIdForAmounts: vi.fn(),
     findByIdWithPurchaseReceiptIds: vi.fn(),
   };
   const transferReceipts = { membersWhoHaveUploaded: vi.fn() };
   const payments = { transfersFor: vi.fn(), memberCost: vi.fn() };
-  const groups = { hasMember: vi.fn().mockResolvedValue(true) };
+  const groups = { hasMember: vi.fn().mockResolvedValue(true), findByMember: vi.fn().mockResolvedValue([]) };
   const service = new EventService({ events, transferReceipts, payments, groups, mapper: new EventMapper() } as any);
   return { service, events, transferReceipts, payments, groups };
 }
 
 describe("EventMapper.toPublic", () => {
   const mapper = new EventMapper();
+  const groupId = id();
   const base = {
     _id: id(),
     title: "Asado",
@@ -40,7 +39,7 @@ describe("EventMapper.toPublic", () => {
       chef: { name: "Ana" },
       members: [id(), id(), id()],
       ratings: [{ score: 5 }, { score: 2 }],
-      isPrivate: true,
+      group: { _id: groupId, name: "Amigos", code: "K7PX2MQA" },
       penalization: 10,
       penalizationStartDate: new Date("2026-02-01"),
     } as any);
@@ -48,21 +47,38 @@ describe("EventMapper.toPublic", () => {
       chef: "Ana",
       members: 3,
       ratings: { avgScore: 3.5, ratingsAmount: 2 },
-      isPrivate: true,
+      group: { _id: groupId, name: "Amigos" },
       penalization: 10,
     });
+    expect(result.group).not.toHaveProperty("code");
     expect(result).not.toHaveProperty("organizer");
   });
 
-  it("eventos viejos sin atributos: valores por defecto", () => {
-    const result = mapper.toPublic({ ...base, chef: null, members: [], penalization: 0 } as any);
+  it("sin chef, calificaciones ni penalización: chef null, ratings en 0 y penalización null", () => {
+    const result = mapper.toPublic({ ...base, group: { _id: groupId, name: "g" }, chef: null, members: [], ratings: [], penalization: null } as any);
     expect(result).toMatchObject({
       chef: null,
       ratings: { avgScore: 0, ratingsAmount: 0 },
-      isPrivate: false,
       penalization: null,
       penalizationStartDate: null,
     });
+  });
+});
+
+describe("EventService.listForUser", () => {
+  it("busca los eventos de los grupos del usuario y los resume", async () => {
+    const { service, events, groups } = setup();
+    const g1 = id();
+    const g2 = id();
+    groups.findByMember.mockResolvedValue([{ _id: g1 }, { _id: g2 }]);
+    events.findSummariesInGroups.mockResolvedValue([
+      { _id: id(), group: { _id: g1, name: "A" }, chef: null, members: [], ratings: [], shoppingDesignee: [] },
+    ]);
+    const result = await service.listForUser("u");
+    expect(groups.findByMember).toHaveBeenCalledWith("u");
+    expect(events.findSummariesInGroups).toHaveBeenCalledWith([g1, g2]);
+    expect(result).toHaveLength(1);
+    expect(result[0].group).toEqual({ _id: g1, name: "A" });
   });
 });
 

@@ -12,15 +12,8 @@ import { eventController } from "../modules/events/index.js";
 
 const eventRouter: express.Router = express.Router();
 
-eventRouter.get("/getEvents", auth, asyncHandler(eventController.list));
-
-eventRouter.get("/getPublicEvents", asyncHandler(eventController.listPublic));
-
-eventRouter.get(
-  "/getPublicAndPrivateEvents",
-  auth,
-  asyncHandler(eventController.listPublicAndPrivate)
-);
+// Eventos de todos los grupos del usuario (GROUPS_FEATURE.md §5.2).
+eventRouter.get("/getMyEvents", auth, asyncHandler(eventController.listMine));
 
 // Eventos de un grupo (GROUPS_FEATURE.md §6).
 eventRouter.get(

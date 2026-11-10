@@ -95,7 +95,7 @@ Relevant fields include:
 - `organizer`
 - `chef`
 - `shoppingDesignee`
-- `isPrivate`
+- `group` (every event belongs to exactly one group; there are no public events)
 - `state`
 - `penalization`
 - `penalizationStartDate`

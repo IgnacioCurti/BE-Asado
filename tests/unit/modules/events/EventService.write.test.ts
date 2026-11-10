@@ -131,7 +131,7 @@ describe("EventService.unsubscribe", () => {
 });
 
 describe("EventService.edit", () => {
-  const body = { title: "t", datetime: new Date(), memberLimit: 5, penalization: 0, isPrivate: false };
+  const body = { title: "t", datetime: new Date(), memberLimit: 5, penalization: 0 };
 
   it.each([
     ["available", "readyforpayment"],

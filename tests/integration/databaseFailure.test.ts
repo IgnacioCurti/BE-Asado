@@ -9,9 +9,7 @@ import { createUser, newId, simulateDatabaseFailure } from "../helpers/fixtures.
 const ID = newId();
 
 const routes: [string, string, boolean][] = [
-  ["get", "/api/events/getEvents", true],
-  ["get", "/api/events/getPublicEvents", false],
-  ["get", "/api/events/getPublicAndPrivateEvents", true],
+  ["get", "/api/events/getMyEvents", true],
   ["get", `/api/events/getEventById/${ID}`, true],
   ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`, true],
   ["get", `/api/events/getMembersAmount/${ID}`, true],

@@ -132,7 +132,6 @@ export interface EventFixture {
   purchaseReceipts: Id[];
   ratings: Id[];
   options: Id[];
-  isPrivate: boolean;
   penalization: number | null;
   penalizationStartDate?: string | null;
 }
@@ -182,13 +181,6 @@ export async function addGroupMembers(groupId: Id, userIds: Id[]): Promise<void>
 
 export async function removeGroupMember(groupId: Id, userId: Id): Promise<void> {
   await Group.updateOne({ _id: groupId }, { $pull: { members: userId, admins: userId } });
-}
-
-/** Inserta un evento sin pasar por los defaults/validaciones del schema (simula datos legados). */
-export async function insertRawEvent(raw: Record<string, unknown>): Promise<Id> {
-  const _id = new mongoose.Types.ObjectId();
-  await Event.collection.insertOne({ _id, ...raw });
-  return _id.toString();
 }
 
 export async function findEvent(id: Id): Promise<EventFixture | null> {

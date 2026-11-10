@@ -6,16 +6,8 @@ import { EventService } from "./EventService.js";
 export class EventController {
   constructor(private readonly service: EventService) {}
 
-  list = async (req: IRequestWithUser, res: Response): Promise<Response> => {
-    return res.json(await this.service.listVisibleTo(req.user._id));
-  };
-
-  listPublic = async (_req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.listPublic());
-  };
-
-  listPublicAndPrivate = async (req: IRequestWithUser, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.listPublicVisibleTo(req.user._id));
+  listMine = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res.status(STATUS_CODES.OK).json(await this.service.listForUser(req.user._id));
   };
 
   listByGroup = async (req: Request, res: Response): Promise<Response> => {
@@ -74,7 +66,6 @@ export class EventController {
       penalization: req.body.penalization,
       penalizationStartDate: req.body.penalizationStartDate,
       state: req.body.state,
-      isPrivate: req.body.isPrivate,
     });
     return res.status(STATUS_CODES.OK).json(event);
   };

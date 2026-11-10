@@ -153,39 +153,21 @@ export class EventRepository extends BaseRepository<IEvent> {
       .exec() as unknown as Promise<IEventWithPurchaseReceiptsPopulatedMembersTransferReceipts | null>;
   }
 
-  // Públicos + privados donde el usuario es miembro.
-  private static visibleTo(userId: string) {
-    return { $or: [{ isPrivate: { $ne: true } }, { isPrivate: true, members: userId }] };
-  }
-
   private static readonly SUMMARY_FIELDS: string =
-    "datetime description state chef shoppingDesignee memberLimit members title ratings isPrivate penalization penalizationStartDate";
+    "datetime description state chef shoppingDesignee memberLimit members title ratings group penalization penalizationStartDate";
 
-  findVisibleTo(userId: string): Promise<IEvent[]> {
-    return this.model
-      .find(EventRepository.visibleTo(userId))
-      .sort({ datetime: -1, _id: 1 })
-      .exec();
-  }
-
-  // Mismo orden que findVisibleTo.
+  // Más nuevos primero.
   findByGroup(groupId: string): Promise<IEvent[]> {
     return this.model.find({ group: groupId }).sort({ datetime: -1, _id: 1 }).exec();
   }
 
-  findPublicSummaries(): Promise<IPublicEventPreReduction[]> {
-    return this.findSummaries({ isPrivate: { $ne: true } });
-  }
-
-  findSummariesVisibleTo(userId: string): Promise<IPublicEventPreReduction[]> {
-    return this.findSummaries(EventRepository.visibleTo(userId));
-  }
-
-  private findSummaries(filter: FilterQuery<IEvent>): Promise<IPublicEventPreReduction[]> {
+  // Resumen de los eventos de esos grupos, más nuevos primero.
+  findSummariesInGroups(groupIds: mongoose.Types.ObjectId[]): Promise<IPublicEventPreReduction[]> {
     return this.model
-      .find(filter)
+      .find({ group: { $in: groupIds } })
       .select(EventRepository.SUMMARY_FIELDS)
-      .sort({ datetime: -1 })
+      .sort({ datetime: -1, _id: 1 })
+      .populate("group", "name")
       .populate("chef", "name")
       .populate("ratings")
       .populate("shoppingDesignee", SAFE_USER)
