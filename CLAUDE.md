@@ -27,5 +27,13 @@ Verify commands against `package.json` before changing them.
 - Node/TypeScript: `.claude/node-typescript/SKILL.md`
 - MongoDB/Mongoose: `.claude/mongodb-mongoose/SKILL.md`
 - Testing: `.claude/testing/SKILL.md`
+- Git, commits, PRs y label `deploy-dev`: `.claude/git-conventions/SKILL.md`
 
 Inspect the actual repository structure before assuming file paths or architectural layers.
+## Ramas y PRs
+- `main` es producción. Todos los PRs van contra `main` (nunca contra `dev`).
+- `dev` es una rama GENERADA por `.github/workflows/rebuild-dev.yml` (= main + PRs abiertos con label `deploy-dev`).
+  Nunca commitear, pushear ni abrir PRs desde/hacia `dev`: se sobrescribe con force-push.
+- Sin atribución de Claude en commits ni PRs (sin `Co-Authored-By: Claude`).
+- Antes de crear ramas, commitear o abrir PRs, leer `.claude/git-conventions/SKILL.md`
+  (convenciones de commits/ramas y uso del label `deploy-dev`).

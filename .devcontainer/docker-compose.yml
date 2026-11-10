@@ -3,6 +3,11 @@ services:
     image: mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm
     volumes:
       - ..:/workspaces/BE-Asado:cached
+      # Persiste config, login e historial de chats de Claude Code entre rebuilds del container
+      - claude-config:/home/node/.claude
+    environment:
+      # Hace que Claude guarde también .claude.json dentro del volumen (si no, queda en ~/.claude.json y se pierde)
+      CLAUDE_CONFIG_DIR: /home/node/.claude
     # Mantiene el container vivo; los comandos los corrés vos desde la terminal de VS Code
     command: sleep infinity
     depends_on:
@@ -34,3 +39,4 @@ services:
 
 volumes:
   mongo-data:
+  claude-config:

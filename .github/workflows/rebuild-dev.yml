@@ -1,0 +1,49 @@
+name: Rebuild dev
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  rebuild:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.action == 'unlabeled' ||
+      contains(github.event.pull_request.labels.*.name, 'deploy-dev')
+    runs-on: ubuntu-latest
+    # A nivel job (no workflow): los runs salteados por el `if` no cancelan rebuilds en curso
+    concurrency:
+      group: rebuild-dev
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: dev = main + PRs con label deploy-dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git checkout -B dev origin/main
+
+          branches=$(gh pr list --state open --base main --label deploy-dev \
+            --json headRefName --jq '.[].headRefName')
+
+          for b in $branches; do
+            echo "Mergeando $b"
+            if ! git merge --no-edit "origin/$b"; then
+              git merge --abort
+              echo "::warning::$b tiene conflictos con main u otro PR, se omite"
+            fi
+          done
+
+          git push -f origin dev
