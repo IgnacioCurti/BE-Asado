@@ -1,4 +1,5 @@
 import { EventRepository } from "../events/EventRepository.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRepository.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
@@ -12,7 +13,8 @@ export const imageService = new ImageService(
   new UserRepository(),
   new PurchaseReceiptRepository(),
   new TransferReceiptRepository(),
-  new EventRepository()
+  new EventRepository(),
+  new GroupRepository()
 );
 
 export const imageController = new ImageController(imageService);

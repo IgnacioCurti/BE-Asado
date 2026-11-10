@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 5 del plan (sección 9).
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 6 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -87,7 +87,7 @@ Decisiones de modelado propuestas:
 ### 3.5 Fotos de portada
 
 - Reutilizan el modelo `Image` existente: buffer en Mongo, límite de 5 MB y `multerUploadImages` (PNG/JPEG).
-- Hoy `getImage` permite ver las fotos de perfil a cualquier usuario logueado, y las imágenes de comprobantes solo a los miembros del evento. Hay que agregar una regla: **portada de grupo → miembros del grupo**.
+- Hoy `getImage` permite ver las fotos de perfil a cualquier usuario logueado, y las imágenes de comprobantes solo a los miembros del evento. Se agrega una regla: **portada de grupo → miembros del grupo** ✅ (paso 6).
 - Cómo se muestran las portadas lo decide el front. El backend las devuelve en el orden en que se subieron.
 
 ## 4. Flujos
@@ -381,7 +381,9 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
    - El aviso de evento nuevo va a los miembros del grupo con `notifications.newEvent`, sin el organizador; los miembros se leen al correr el cron. El mail menciona el grupo (nombre escapado).
    - `createEvent` programa siempre el recordatorio `newEvent`; se quitó el chequeo de `isPrivate` en `notifyNewEvent`.
    - Se eliminó la limpieza automática (`pruneEndedEvents`, `countPublic`, `findPublicEndedOldestFirst`).
-6. Portadas (subir, borrar y acceso en `getImage`).
+6. Portadas (subir, borrar y acceso en `getImage`). ✅ (rama `t/groups-model`):
+   - `POST /groups/addCoverPhoto/:group` y `DELETE /groups/deleteCoverPhoto/:group/:image` (admins). El límite de 5 se vuelve a verificar al escribir; si se llenó en el medio, se borra la imagen recién guardada.
+   - `getImage`: una portada de grupo solo la ven los miembros del grupo (403 para el resto).
 7. Invitaciones por mail, opción A.
 8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7).
 9. Invitaciones por mail, opción B.

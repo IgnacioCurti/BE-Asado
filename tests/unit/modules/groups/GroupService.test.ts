@@ -26,7 +26,10 @@ function setup() {
     rename: vi.fn(),
     removeMemberKeepingAnAdmin: vi.fn(),
     deleteIfOnlyMember: vi.fn(),
+    addCoverPhoto: vi.fn(),
+    removeCoverPhoto: vi.fn(),
   };
+  const images = { save: vi.fn(async () => oid()), delete: vi.fn() };
   const session = { fake: "session" };
   const events = {
     findActiveInGroupInvolving: vi.fn().mockResolvedValue([]),
@@ -36,8 +39,8 @@ function setup() {
   };
   const debtors = { getDebtors: vi.fn().mockResolvedValue([]) };
   const transaction = vi.fn(async (work: (session: unknown) => unknown) => work(session));
-  const service = new GroupService(groups as any, { events, debtors, transaction } as any);
-  return { service, groups, events, debtors, transaction, session };
+  const service = new GroupService(groups as any, { events, debtors, transaction } as any, images as any);
+  return { service, groups, events, debtors, transaction, session, images };
 }
 
 describe("GroupService.create", () => {
@@ -226,6 +229,72 @@ describe("GroupService.makeAdmin", () => {
       new BadRequestError("The user is not a member of the group.")
     );
     await expect(service.makeAdmin(s(oid()), "abc")).rejects.toEqual(new BadRequestError("Invalid ObjectID"));
+  });
+});
+
+describe("GroupService.addCoverPhoto", () => {
+  const file = { originalname: "p.png", mimetype: "image/png", buffer: Buffer.from("x") } as any;
+  const withPhotos = (n: number) => ({ _id: oid(), coverPhotos: Array.from({ length: n }, oid) });
+
+  it("sin archivo -> BadRequestError", async () => {
+    const { service, images } = setup();
+    await expect(service.addCoverPhoto(s(oid()), undefined)).rejects.toBeInstanceOf(BadRequestError);
+    expect(images.save).not.toHaveBeenCalled();
+  });
+
+  it("guarda la imagen y la agrega al grupo", async () => {
+    const { service, groups, images } = setup();
+    const groupId = s(oid());
+    const updated = withPhotos(1);
+    groups.findById.mockResolvedValue(withPhotos(0));
+    groups.addCoverPhoto.mockResolvedValue(updated);
+    expect(await service.addCoverPhoto(groupId, file)).toBe(updated);
+    const imageId = await images.save.mock.results[0].value;
+    expect(groups.addCoverPhoto).toHaveBeenCalledWith(groupId, imageId);
+  });
+
+  it("con 5 portadas -> ConflictError sin guardar la imagen", async () => {
+    const { service, groups, images } = setup();
+    groups.findById.mockResolvedValue(withPhotos(5));
+    await expect(service.addCoverPhoto(s(oid()), file)).rejects.toBeInstanceOf(ConflictError);
+    expect(images.save).not.toHaveBeenCalled();
+  });
+
+  it("si se llenó en el medio, borra la imagen guardada -> ConflictError", async () => {
+    const { service, groups, images } = setup();
+    groups.findById.mockResolvedValue(withPhotos(4));
+    groups.addCoverPhoto.mockResolvedValue(null);
+    await expect(service.addCoverPhoto(s(oid()), file)).rejects.toBeInstanceOf(ConflictError);
+    expect(images.delete).toHaveBeenCalledWith(await images.save.mock.results[0].value);
+  });
+
+  it("grupo inexistente -> NotFoundError", async () => {
+    const { service, groups } = setup();
+    groups.findById.mockResolvedValue(null);
+    await expect(service.addCoverPhoto(s(oid()), file)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("GroupService.deleteCoverPhoto", () => {
+  it("id inválido -> BadRequestError", async () => {
+    const { service } = setup();
+    await expect(service.deleteCoverPhoto(s(oid()), "abc")).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("la saca del grupo y borra la imagen", async () => {
+    const { service, groups, images } = setup();
+    const image = oid();
+    const updated = { coverPhotos: [] };
+    groups.removeCoverPhoto.mockResolvedValue(updated);
+    expect(await service.deleteCoverPhoto(s(oid()), s(image))).toBe(updated);
+    expect(images.delete).toHaveBeenCalledWith(image);
+  });
+
+  it("si no es portada del grupo -> NotFoundError sin borrar nada", async () => {
+    const { service, groups, images } = setup();
+    groups.removeCoverPhoto.mockResolvedValue(null);
+    await expect(service.deleteCoverPhoto(s(oid()), s(oid()))).rejects.toBeInstanceOf(NotFoundError);
+    expect(images.delete).not.toHaveBeenCalled();
   });
 });
 

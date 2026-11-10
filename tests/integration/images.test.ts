@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { api, auth, PDF_BYTES, PNG_BYTES } from "../helpers/api.js";
-import { createEvent, createImage, createPurchaseReceipt, createTransferReceipt, createUser, newId } from "../helpers/fixtures.js";
+import { createEvent, createGroup, createImage, createPurchaseReceipt, createTransferReceipt, createUser, newId } from "../helpers/fixtures.js";
 
 describe("GET /api/images/getImage/:id", () => {
   it.each([
@@ -86,5 +86,19 @@ describe("GET /api/images/getImage/:id", () => {
     const res = await api().get("/api/images/getImage/abc").set(auth(user.token));
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ message: "No valid id was provided." });
+  });
+
+  describe("portada de un grupo", () => {
+    it("la ve un miembro del grupo; alguien de afuera -> 403", async () => {
+      const member = await createUser();
+      const outsider = await createUser();
+      const photo = await createImage();
+      await createGroup({ members: [member._id], coverPhotos: [photo] });
+
+      expect((await api().get(`/api/images/getImage/${photo}`).set(auth(member.token))).status).toBe(200);
+      const res = await api().get(`/api/images/getImage/${photo}`).set(auth(outsider.token));
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ message: "Access denied. The user is not a member of the group." });
+    });
   });
 });

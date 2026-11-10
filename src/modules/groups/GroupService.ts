@@ -10,12 +10,14 @@ import { isValidId } from "../../core/validation/isValidId.js";
 import { GROUP_LIMITS } from "../../models/group.js";
 import { IEvent, IGroup } from "../../models/interfaces.js";
 import { EventRepository } from "../events/EventRepository.js";
+import { ImageService } from "../images/ImageService.js";
 import { TransferReceiptService } from "../transferReceipts/TransferReceiptService.js";
 import { groupNotFoundMessage } from "./GroupAccessPolicy.js";
 import { isValidGroupCode, normalizeGroupCode } from "./groupCode.js";
 import { GroupRepository, IGroupWithMembers } from "./GroupRepository.js";
 
 const groupLimitMessage: string = `A user can belong to at most ${GROUP_LIMITS.MAX_GROUPS_PER_USER} groups.`;
+const coverPhotoLimitMessage: string = `A group can have at most ${GROUP_LIMITS.MAX_COVER_PHOTOS} cover photos.`;
 const onlyAdminMessage: string =
   "The only admin can't leave the group while it has other members. Make another member an admin first.";
 const pendingDebtMessage: string =
@@ -49,6 +51,8 @@ export type GroupServiceDeps = Pick<
   | "rename"
   | "removeMemberKeepingAnAdmin"
   | "deleteIfOnlyMember"
+  | "addCoverPhoto"
+  | "removeCoverPhoto"
 >;
 
 // Lo que necesita "salir del grupo" de los eventos del grupo (§4.4 y §4.6).
@@ -67,7 +71,8 @@ export interface GroupEventsDeps {
 export class GroupService {
   constructor(
     private readonly groups: GroupServiceDeps,
-    private readonly groupEvents: GroupEventsDeps
+    private readonly groupEvents: GroupEventsDeps,
+    private readonly images: Pick<ImageService, "save" | "delete">
   ) {}
 
   async create(userId: string, name: unknown): Promise<IGroup> {
@@ -202,6 +207,30 @@ export class GroupService {
     const updated: IGroup | null = await this.groups.regenerateCode(groupId);
     if (!updated) throw new NotFoundError(groupNotFoundMessage);
     return updated.code;
+  }
+
+  // Portadas (§3.5): hasta 5, en el orden en que se subieron. El límite se
+  // vuelve a verificar al escribir; si se llenó en el medio, se borra la imagen.
+  async addCoverPhoto(groupId: string, file: Express.Multer.File | undefined): Promise<IGroup> {
+    if (!file) throw new BadRequestError("No file was uploaded.");
+    const group: IGroup = await this.getGroup(groupId);
+    if (group.coverPhotos.length >= GROUP_LIMITS.MAX_COVER_PHOTOS)
+      throw new ConflictError(coverPhotoLimitMessage);
+    const imageId: mongoose.Types.ObjectId = await this.images.save(file);
+    const updated: IGroup | null = await this.groups.addCoverPhoto(groupId, imageId);
+    if (updated) return updated;
+    await this.images.delete(imageId);
+    await this.getGroup(groupId);
+    throw new ConflictError(coverPhotoLimitMessage);
+  }
+
+  async deleteCoverPhoto(groupId: string, imageId: string): Promise<IGroup> {
+    if (!isValidId(imageId)) throw new BadRequestError("Invalid ObjectID");
+    const image = new mongoose.Types.ObjectId(imageId);
+    const updated: IGroup | null = await this.groups.removeCoverPhoto(groupId, image);
+    if (!updated) throw new NotFoundError("The image is not a cover photo of the group.");
+    await this.images.delete(image);
+    return updated;
   }
 
   private parseName(name: unknown): string {

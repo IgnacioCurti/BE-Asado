@@ -12,6 +12,7 @@ function setup() {
     purchaseReceipts: { findByImage: vi.fn().mockResolvedValue(null) },
     transferReceipts: { findByImage: vi.fn().mockResolvedValue(null) },
     events: { findById: vi.fn() },
+    groups: { findByCoverPhoto: vi.fn().mockResolvedValue(null) },
   };
   const service = new ImageService(
     repos.images as any,
@@ -19,6 +20,7 @@ function setup() {
     repos.purchaseReceipts as any,
     repos.transferReceipts as any,
     repos.events as any,
+    repos.groups as any,
     () => 1700000000000
   );
   return { service, ...repos };
@@ -69,6 +71,30 @@ describe("ImageService.getForUser", () => {
     transferReceipts.findByImage.mockResolvedValue({ event: id() });
     events.findById.mockResolvedValue({ members: [id()] });
     await expect(service.getForUser(imageId, userId)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe("ImageService.getForUser: portadas de grupo", () => {
+  const imageId = String(id());
+  const userId = String(id());
+  const image = { mimetype: "image/png", image: Buffer.from("x") };
+
+  it("la ve un miembro del grupo", async () => {
+    const { service, images, groups } = setup();
+    images.findById.mockResolvedValue(image);
+    groups.findByCoverPhoto.mockResolvedValue({ members: [new mongoose.Types.ObjectId(userId)] });
+    expect(await service.getForUser(imageId, userId)).toBe(image);
+    expect(groups.findByCoverPhoto).toHaveBeenCalledWith(imageId);
+  });
+
+  it("un no miembro recibe ForbiddenError con el mensaje del grupo", async () => {
+    const { service, images, groups, purchaseReceipts } = setup();
+    images.findById.mockResolvedValue(image);
+    groups.findByCoverPhoto.mockResolvedValue({ members: [id()] });
+    await expect(service.getForUser(imageId, userId)).rejects.toEqual(
+      new ForbiddenError("Access denied. The user is not a member of the group.")
+    );
+    expect(purchaseReceipts.findByImage).not.toHaveBeenCalled();
   });
 });
 
