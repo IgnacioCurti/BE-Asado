@@ -1,5 +1,5 @@
 import express from "express";
-import { auth, groupAdmin, groupMember } from "../middleware/middleware.js";
+import { auth, groupAdmin, groupMember, multerUploadImages } from "../middleware/middleware.js";
 import { asyncHandler } from "../core/http/asyncHandler.js";
 import { groupController as controller } from "../modules/groups/index.js";
 
@@ -28,6 +28,18 @@ groupsRouter.put(
   "/regenerateCode/:group",
   [auth, groupAdmin],
   asyncHandler(controller.regenerateCode)
+);
+
+groupsRouter.post(
+  "/addCoverPhoto/:group",
+  [auth, groupAdmin, multerUploadImages.single("file")],
+  asyncHandler(controller.addCoverPhoto)
+);
+
+groupsRouter.delete(
+  "/deleteCoverPhoto/:group/:image",
+  [auth, groupAdmin],
+  asyncHandler(controller.deleteCoverPhoto)
 );
 
 export default groupsRouter;

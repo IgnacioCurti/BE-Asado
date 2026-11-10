@@ -6,14 +6,20 @@ import {
   NotFoundError,
 } from "../../core/errors/AppError.js";
 import { isValidId } from "../../core/validation/isValidId.js";
-import { IEvent, IImage } from "../../models/interfaces.js";
+import { IEvent, IGroup, IImage } from "../../models/interfaces.js";
 import { EventRepository } from "../events/EventRepository.js";
+import { GroupRepository } from "../groups/GroupRepository.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { PurchaseReceiptRepository } from "../purchaseReceipts/PurchaseReceiptRepository.js";
 import { TransferReceiptRepository } from "../transferReceipts/TransferReceiptRepository.js";
 import { ImageRepository } from "./ImageRepository.js";
 
-type ImageAccess = "allowed" | "forbidden" | "unreferenced";
+type ImageAccess = "allowed" | "notEventMember" | "notGroupMember" | "unreferenced";
+
+const forbiddenMessages: Record<"notEventMember" | "notGroupMember", string> = {
+  notEventMember: "Access denied. The user is not a participant of the event.",
+  notGroupMember: "Access denied. The user is not a member of the group.",
+};
 
 export class ImageService {
   constructor(
@@ -22,18 +28,20 @@ export class ImageService {
     private readonly purchaseReceipts: Pick<PurchaseReceiptRepository, "findByImage">,
     private readonly transferReceipts: Pick<TransferReceiptRepository, "findByImage">,
     private readonly events: Pick<EventRepository, "findById">,
+    private readonly groups: Pick<GroupRepository, "findByCoverPhoto">,
     private readonly now: () => number = Date.now
   ) {}
 
   // Las fotos de perfil las ve cualquier usuario logueado; las de recibos,
-  // solo los miembros del evento. Las imágenes sin referencias no se sirven.
+  // solo los miembros del evento; las portadas de grupo, solo los miembros del
+  // grupo. Las imágenes sin referencias no se sirven.
   async getForUser(imageId: string, userId: string): Promise<IImage> {
     if (!isValidId(imageId)) throw new BadRequestError("No valid id was provided.");
     const image: IImage | null = await this.images.findById(imageId);
     const access: ImageAccess | null = image ? await this.access(imageId, userId) : null;
     if (!image || access === "unreferenced") throw new NotFoundError("No image was found.");
-    if (access === "forbidden")
-      throw new ForbiddenError("Access denied. The user is not a participant of the event.");
+    if (access === "notEventMember" || access === "notGroupMember")
+      throw new ForbiddenError(forbiddenMessages[access]);
     return image;
   }
 
@@ -54,6 +62,11 @@ export class ImageService {
 
   private async access(imageId: string, userId: string): Promise<ImageAccess> {
     if (await this.users.hasProfilePicture(imageId)) return "allowed";
+    const group: IGroup | null = await this.groups.findByCoverPhoto(imageId);
+    if (group)
+      return group.members.some((member) => member.toString() === userId)
+        ? "allowed"
+        : "notGroupMember";
     const receipt: { event: mongoose.Types.ObjectId } | null =
       (await this.purchaseReceipts.findByImage(imageId)) ??
       (await this.transferReceipts.findByImage(imageId));
@@ -61,7 +74,7 @@ export class ImageService {
     const event: IEvent | null = await this.events.findById(String(receipt.event));
     return event?.members.some((member) => member.toString() === userId)
       ? "allowed"
-      : "forbidden";
+      : "notEventMember";
   }
 
   private createImageName(originalname: string): string {

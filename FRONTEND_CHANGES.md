@@ -642,3 +642,32 @@ Se eliminó: antes, al crear un evento, si había más de 6 eventos públicos se
 
 #### Cómo adaptar el front (probable)
 - Nada obligatorio. Si la pantalla de preferencias describe el aviso de evento nuevo, aclarar que es "eventos nuevos de mis grupos".
+
+---
+
+### 30. Grupos: fotos de portada
+
+**Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** sí · **Origen:** GROUPS_FEATURE §3.5, §6, paso 6
+
+#### Endpoints nuevos (solo admins del grupo)
+
+| Endpoint | Body | Respuesta |
+|--|--|--|
+| `POST /api/groups/addCoverPhoto/:group` | `multipart/form-data`, campo `file` (PNG o JPEG, hasta 5 MB) | **201** con el grupo actualizado. La portada nueva queda al final de `coverPhotos`. |
+| `DELETE /api/groups/deleteCoverPhoto/:group/:image` | — | **200** con el grupo actualizado. La imagen se borra. |
+
+| Caso | Respuesta |
+|--|--|
+| Sin archivo | **400** `"No file was uploaded."` |
+| Ya hay 5 portadas | **409** `"A group can have at most 5 cover photos."` |
+| `:image` mal formado | **400** `"Invalid ObjectID"` |
+| `:image` no es portada de ese grupo | **404** `"The image is not a cover photo of the group."` |
+| No es admin / no es miembro / grupo inexistente | **403** / **403** / **404** (igual que el resto de los endpoints de admin) |
+| Archivo que no es PNG/JPEG o de más de 5 MB | **500** (error de multer sin manejar, mismo comportamiento que `editProfilePicture`) |
+
+#### Ver una portada
+`GET /api/images/getImage/:id`: si la imagen es portada de un grupo, solo la ven los miembros del grupo. Resto: **403** `"Access denied. The user is not a member of the group."`.
+
+#### Cómo adaptar el front (probable)
+- En la pantalla del grupo, mostrar `coverPhotos` (ids) con `getImage`, en el orden en que vienen.
+- Para admins: subir (deshabilitar al llegar a 5) y borrar portadas.

@@ -95,6 +95,32 @@ export class GroupRepository extends BaseRepository<IGroup> {
       .exec();
   }
 
+  // Agrega la portada solo si, al escribir, el grupo no llegó al límite (§8).
+  addCoverPhoto(groupId: string, imageId: mongoose.Types.ObjectId): Promise<IGroup | null> {
+    return this.model
+      .findOneAndUpdate(
+        { _id: groupId, [`coverPhotos.${GROUP_LIMITS.MAX_COVER_PHOTOS - 1}`]: { $exists: false } },
+        { $push: { coverPhotos: imageId } },
+        { new: true }
+      )
+      .exec();
+  }
+
+  // null si la imagen no es portada del grupo.
+  removeCoverPhoto(groupId: string, imageId: mongoose.Types.ObjectId): Promise<IGroup | null> {
+    return this.model
+      .findOneAndUpdate(
+        { _id: groupId, coverPhotos: imageId },
+        { $pull: { coverPhotos: imageId } },
+        { new: true }
+      )
+      .exec();
+  }
+
+  findByCoverPhoto(imageId: string): Promise<IGroup | null> {
+    return this.model.findOne({ coverPhotos: imageId }).exec();
+  }
+
   rename(groupId: string, name: string): Promise<IGroup | null> {
     return this.model
       .findByIdAndUpdate(groupId, { $set: { name } }, { new: true, runValidators: true })

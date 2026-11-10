@@ -1,5 +1,6 @@
 import { runInTransaction } from "../../core/repositories/transaction.js";
 import { EventRepository } from "../events/EventRepository.js";
+import { imageService } from "../images/index.js";
 import { transferReceiptService } from "../transferReceipts/index.js";
 import { GroupAccessPolicy } from "./GroupAccessPolicy.js";
 import { GroupController } from "./GroupController.js";
@@ -14,7 +15,7 @@ export const groupController = new GroupController(
     events: new EventRepository(),
     debtors: transferReceiptService,
     transaction: runInTransaction,
-  })
+  }, imageService)
 );
 export const groupAccessPolicy = new GroupAccessPolicy(groupRepository);
 export { GroupService };

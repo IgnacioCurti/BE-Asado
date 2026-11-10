@@ -4,7 +4,7 @@
  * son del paso 4.
  */
 import { describe, expect, it } from "vitest";
-import { api, auth } from "../helpers/api.js";
+import { api, auth, PDF_BYTES, PNG_BYTES } from "../helpers/api.js";
 import {
   countEvents,
   countGroups,
@@ -547,5 +547,109 @@ describe("PUT /api/groups/regenerateCode/:group", () => {
   it("un miembro que no es admin -> 403", async () => {
     const { member, group } = await trio();
     expect((await api().put(`/api/groups/regenerateCode/${group._id}`).set(as(member))).status).toBe(403);
+  });
+});
+
+describe("POST /api/groups/addCoverPhoto/:group", () => {
+  const upload = (groupId: string, user: UserFixture) =>
+    api()
+      .post(`/api/groups/addCoverPhoto/${groupId}`)
+      .set(as(user))
+      .attach("file", PNG_BYTES, { filename: "portada.png", contentType: "image/png" });
+
+  it("un admin sube una portada: se guarda y se agrega al final", async () => {
+    const { admin, group } = await trio();
+    const first = await upload(group._id, admin);
+    const second = await upload(group._id, admin);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.body.coverPhotos).toHaveLength(2);
+    expect(second.body.coverPhotos[0]).toBe(first.body.coverPhotos[0]);
+    const image = await findImage(second.body.coverPhotos[1]);
+    expect(image!.mimetype).toBe("image/png");
+    expect((await findGroup(group._id))!.coverPhotos).toEqual(second.body.coverPhotos);
+  });
+
+  it("con 5 portadas -> 409 y no guarda la imagen", async () => {
+    const { admin, member } = await trio();
+    const photos = await Promise.all(Array.from({ length: 5 }, () => createImage()));
+    const group = await createGroup({ members: [admin._id, member._id], coverPhotos: photos });
+    const res = await upload(group._id, admin);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ message: "A group can have at most 5 cover photos." });
+    expect(await countImages()).toBe(5);
+  });
+
+  it("sin archivo -> 400", async () => {
+    const { admin, group } = await trio();
+    const res = await api().post(`/api/groups/addCoverPhoto/${group._id}`).set(as(admin));
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "No file was uploaded." });
+  });
+
+  it("[comportamiento actual] un PDF lo rechaza multer con 500 y no se guarda", async () => {
+    const { admin, group } = await trio();
+    const res = await api()
+      .post(`/api/groups/addCoverPhoto/${group._id}`)
+      .set(as(admin))
+      .attach("file", PDF_BYTES, { filename: "a.pdf", contentType: "application/pdf" });
+    expect(res.status).toBe(500);
+    expect(await countImages()).toBe(0);
+  });
+
+  it("un miembro que no es admin -> 403; alguien de afuera -> 403; grupo inexistente -> 404", async () => {
+    const { member, outsider, group } = await trio();
+    expect((await upload(group._id, member)).status).toBe(403);
+    expect((await upload(group._id, outsider)).status).toBe(403);
+    expect((await upload(newId(), member)).status).toBe(404);
+    expect(await countImages()).toBe(0);
+  });
+});
+
+describe("DELETE /api/groups/deleteCoverPhoto/:group/:image", () => {
+  async function withPhotos() {
+    const ctx = await trio();
+    const photos = [await createImage(), await createImage()];
+    const group = await createGroup({ members: [ctx.admin._id, ctx.member._id], coverPhotos: photos });
+    return { ...ctx, group, photos };
+  }
+
+  it("un admin borra una portada: sale del grupo y se borra la imagen", async () => {
+    const { admin, group, photos } = await withPhotos();
+    const res = await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/${photos[0]}`).set(as(admin));
+    expect(res.status).toBe(200);
+    expect(res.body.coverPhotos).toEqual([photos[1]]);
+    expect(await findImage(photos[0])).toBeNull();
+    expect(await findImage(photos[1])).not.toBeNull();
+  });
+
+  it("una imagen que no es portada del grupo -> 404 y no se borra", async () => {
+    const { admin, group } = await withPhotos();
+    const other = await createImage();
+    await createUser({ profilePicture: other });
+    const res = await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/${other}`).set(as(admin));
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The image is not a cover photo of the group." });
+    expect(await findImage(other)).not.toBeNull();
+  });
+
+  it("la portada de otro grupo -> 404 y no se toca", async () => {
+    const { admin, group } = await withPhotos();
+    const foreign = await withPhotos();
+    const res = await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/${foreign.photos[0]}`).set(as(admin));
+    expect(res.status).toBe(404);
+    expect((await findGroup(foreign.group._id))!.coverPhotos).toEqual(foreign.photos);
+  });
+
+  it("id de imagen mal formado -> 400", async () => {
+    const { admin, group } = await withPhotos();
+    expect((await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/abc`).set(as(admin))).status).toBe(400);
+  });
+
+  it("un miembro que no es admin -> 403", async () => {
+    const { member, group, photos } = await withPhotos();
+    expect((await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/${photos[0]}`).set(as(member))).status).toBe(403);
+    expect(await findImage(photos[0])).not.toBeNull();
   });
 });

@@ -47,4 +47,16 @@ export class GroupController {
   regenerateCode = async (req: IRequestWithUser, res: Response): Promise<Response> => {
     return res.status(STATUS_CODES.OK).json({ code: await this.service.regenerateCode(req.params.group) });
   };
+
+  addCoverPhoto = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.CREATED)
+      .json(await this.service.addCoverPhoto(req.params.group, req.file));
+  };
+
+  deleteCoverPhoto = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.service.deleteCoverPhoto(req.params.group, req.params.image));
+  };
 }
