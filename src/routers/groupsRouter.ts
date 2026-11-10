@@ -30,6 +30,8 @@ groupsRouter.put(
   asyncHandler(controller.regenerateCode)
 );
 
+groupsRouter.post("/inviteToGroup/:group", [auth, groupAdmin], asyncHandler(controller.invite));
+
 groupsRouter.post(
   "/addCoverPhoto/:group",
   [auth, groupAdmin, multerUploadImages.single("file")],

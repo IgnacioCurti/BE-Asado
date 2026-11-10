@@ -221,3 +221,51 @@ export function penalizationOneWeekTemplate(
     </html>
   `;
 }
+
+// Invitación a un grupo (GROUPS_FEATURE §4.3, opción A): el link lleva el código.
+export function groupInvitationTemplate(
+  groupName: string,
+  inviterName: string,
+  code: string,
+  footerImageUrl: string = "https://i.ibb.co/Zz37kZxZ/logo-rojo.png"
+): string {
+  const who: string = inviterName ? `<strong>${escapeHtml(inviterName)}</strong> te invitó` : "Te invitaron";
+  return `
+    <html>
+    <head>
+      <style>
+        body { background-color: #F6FAF9; margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+        .header { background-color: #BF334D; color: #ffffff; padding: 10px; text-align: center; }
+        .content { margin: 20px 0; color: #333333; text-align: center; }
+        .code { display: block; background-color: #ffffff; border: 2px dashed #BF334D; color: #BF334D; font-size: 1.2em; text-align: center; padding: 10px; margin: 20px auto; border-radius: 4px; width: fit-content; }
+        .button { display: block; background-color: #BF334D; color: #ffffff; padding: 10px 16px; text-decoration: none; border-radius: 4px; width: fit-content; margin: 20px auto; }
+      </style>
+    </head>
+    <body>
+      <div class="header"><h1>FoodSpot | Invitación a un grupo</h1></div>
+      <div class="content">
+        <p>${who} a unirte al grupo <strong>${escapeHtml(groupName)}</strong>. Haz clic a continuación para unirte:</p>
+        <a style="color: #FFFFFF !important;" class="button" href="https://food-spot.vercel.app/join/${encodeURIComponent(code)}">Unirme al grupo</a>
+        <p>O ingresa este código en la app:</p>
+        <span class="code">${escapeHtml(code)}</span>
+      </div>
+      <div style="
+        width:100%;
+        text-align:center;
+        padding-top:20px;
+      ">
+        <img
+          src="${footerImageUrl}"
+          alt="Footnote graphic"
+          style="
+            display:block;
+            max-width:100px;
+            height:auto;
+            margin: 0 auto;
+          "
+        />
+      </div>
+    </body>
+    </html>
+  `;
+}

@@ -671,3 +671,30 @@ Se eliminó: antes, al crear un evento, si había más de 6 eventos públicos se
 #### Cómo adaptar el front (probable)
 - En la pantalla del grupo, mostrar `coverPhotos` (ids) con `getImage`, en el orden en que vienen.
 - Para admins: subir (deshabilitar al llegar a 5) y borrar portadas.
+
+---
+
+### 31. Grupos: invitación por mail
+
+**Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** sí · **Origen:** GROUPS_FEATURE §4.3 (opción A), paso 7
+
+#### Endpoint nuevo (solo admins del grupo)
+`POST /api/groups/inviteToGroup/:group` con body `{ emails: string[] }`.
+
+- Los mails se recortan, se pasan a minúsculas y se quitan los repetidos. Máximo **20** por pedido.
+- A cada uno le llega un mail con el link `https://food-spot.vercel.app/join/<CODE>` y el código del grupo. Si se regenera el código, los links ya enviados dejan de servir.
+- A quien ya es miembro del grupo no se le manda.
+- Responde **200** `{ sent: string[], failed: string[], alreadyMembers: string[] }`. Un envío fallido no corta el resto: queda en `failed`.
+
+| Caso | Respuesta |
+|--|--|
+| `emails` falta, no es un array o está vacío | **400** `"emails must be a non-empty array."` |
+| Algún mail inválido | **400** `"Invalid emails: <lista>"` (no se manda ninguno) |
+| Más de 20 | **400** `"At most 20 emails can be invited at once."` |
+| No es admin / no es miembro / grupo inexistente | **403** / **403** / **404** |
+
+El contrato no cambia cuando llegue la opción B (invitaciones con token): solo cambia el contenido del mail y se agrega `acceptInvitation`.
+
+#### Cómo adaptar el front (probable)
+- Ruta `/join/:code`: si no hay sesión, mandar a login o registro conservando el código; después llamar a `PUT /api/groups/joinGroup` con `{ code }` (ya existía, §27).
+- Pantalla de invitar para admins: mostrar `sent`, `failed` y `alreadyMembers`.

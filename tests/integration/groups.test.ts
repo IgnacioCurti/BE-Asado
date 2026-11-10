@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { api, auth, PDF_BYTES, PNG_BYTES } from "../helpers/api.js";
+import { sentEmails, setBrevoResponseStatus } from "../helpers/mailer.js";
 import {
   countEvents,
   countGroups,
@@ -651,5 +652,63 @@ describe("DELETE /api/groups/deleteCoverPhoto/:group/:image", () => {
     const { member, group, photos } = await withPhotos();
     expect((await api().delete(`/api/groups/deleteCoverPhoto/${group._id}/${photos[0]}`).set(as(member))).status).toBe(403);
     expect(await findImage(photos[0])).not.toBeNull();
+  });
+});
+
+describe("POST /api/groups/inviteToGroup/:group", () => {
+  const invite = (groupId: string, user: UserFixture, emails: unknown) =>
+    api().post(`/api/groups/inviteToGroup/${groupId}`).set(as(user)).send({ emails });
+
+  it("un admin invita: manda un mail con el link y el código del grupo", async () => {
+    const { admin, group } = await trio();
+    const res = await invite(group._id, admin, ["Nuevo@Test.com", "otro@test.com", "nuevo@test.com"]);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: ["nuevo@test.com", "otro@test.com"], failed: [], alreadyMembers: [] });
+    expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual(["nuevo@test.com", "otro@test.com"]);
+    for (const mail of sentEmails) {
+      expect(mail.payload.subject).toBe("FoodSpot | Te invitaron a un grupo");
+      expect(mail.payload.htmlContent).toContain(`https://food-spot.vercel.app/join/${group.code}`);
+      expect(mail.payload.htmlContent).toContain("<strong>Admin");
+    }
+  });
+
+  it("el link del mail sirve para unirse con joinGroup", async () => {
+    const { admin, outsider, group } = await trio();
+    await invite(group._id, admin, [outsider.email]).expect(200);
+    const code = sentEmails[0].payload.htmlContent.match(/\/join\/([A-Z0-9]{8})/)![1];
+    expect((await api().put("/api/groups/joinGroup").set(as(outsider)).send({ code })).status).toBe(200);
+  });
+
+  it("a quien ya es miembro no le manda el mail", async () => {
+    const { admin, member, group } = await trio();
+    const res = await invite(group._id, admin, [member.email, "nuevo@test.com"]);
+    expect(res.body).toEqual({ sent: ["nuevo@test.com"], failed: [], alreadyMembers: [member.email] });
+    expect(sentEmails).toHaveLength(1);
+  });
+
+  it("si el envío falla, responde 200 con los mails en failed", async () => {
+    const { admin, group } = await trio();
+    setBrevoResponseStatus(500);
+    const res = await invite(group._id, admin, ["a@test.com"]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: [], failed: ["a@test.com"], alreadyMembers: [] });
+  });
+
+  it("emails inválidos, vacíos o más de 20 -> 400 sin mandar nada", async () => {
+    const { admin, group } = await trio();
+    expect((await invite(group._id, admin, undefined)).status).toBe(400);
+    expect((await invite(group._id, admin, [])).status).toBe(400);
+    const res = await invite(group._id, admin, ["ok@test.com", "mal"]);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ message: "Invalid emails: mal" });
+    expect((await invite(group._id, admin, Array.from({ length: 21 }, (_, i) => `u${i}@test.com`))).status).toBe(400);
+    expect(sentEmails).toHaveLength(0);
+  });
+
+  it("un miembro que no es admin -> 403", async () => {
+    const { member, group } = await trio();
+    expect((await invite(group._id, member, ["a@test.com"])).status).toBe(403);
+    expect(sentEmails).toHaveLength(0);
   });
 });
