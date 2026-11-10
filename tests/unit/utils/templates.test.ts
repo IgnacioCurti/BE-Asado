@@ -85,22 +85,23 @@ describe.each([
 });
 
 describe("groupInvitationTemplate", () => {
-  it("incluye el link con el código, el código, el grupo y quién invita", () => {
-    const html = groupInvitationTemplate("Amigos", "Ana Pérez", "K7PX2MQA");
-    expect(html).toContain('href="https://food-spot.vercel.app/join/K7PX2MQA"');
-    expect(html).toContain('<span class="code">K7PX2MQA</span>');
+  it("incluye el link con el token, el grupo y quién invita; no incluye el código", () => {
+    const html = groupInvitationTemplate("Amigos", "Ana Pérez", "abc_DEF-123");
+    expect(html).toContain('href="https://food-spot.vercel.app/invitation/abc_DEF-123"');
     expect(html).toContain("<strong>Ana Pérez</strong> te invitó");
     expect(html).toContain("<strong>Amigos</strong>");
+    expect(html).toContain("vence en 7 días");
+    expect(html).not.toContain('class="code"');
     expect(html).toContain(`src="${DEFAULT_LOGO}"`);
   });
 
   it("escapa el nombre del grupo y el de quien invita", () => {
-    const html = groupInvitationTemplate("<b>g</b>", "<i>x</i>", "K7PX2MQA");
+    const html = groupInvitationTemplate("<b>g</b>", "<i>x</i>", "t");
     expect(html).toContain("&lt;b&gt;g&lt;/b&gt;");
     expect(html).toContain("&lt;i&gt;x&lt;/i&gt;");
   });
 
   it("sin nombre de quien invita usa un texto genérico", () => {
-    expect(groupInvitationTemplate("Amigos", "", "K7PX2MQA")).toContain("Te invitaron a unirte");
+    expect(groupInvitationTemplate("Amigos", "", "t")).toContain("Te invitaron a unirte");
   });
 });

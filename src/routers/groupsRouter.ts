@@ -32,6 +32,20 @@ groupsRouter.put(
 
 groupsRouter.post("/inviteToGroup/:group", [auth, groupAdmin], asyncHandler(controller.invite));
 
+groupsRouter.put("/acceptInvitation", auth, asyncHandler(controller.acceptInvitation));
+
+groupsRouter.get(
+  "/getInvitations/:group",
+  [auth, groupAdmin],
+  asyncHandler(controller.listInvitations)
+);
+
+groupsRouter.delete(
+  "/revokeInvitation/:group/:invitation",
+  [auth, groupAdmin],
+  asyncHandler(controller.revokeInvitation)
+);
+
 groupsRouter.post(
   "/addCoverPhoto/:group",
   [auth, groupAdmin, multerUploadImages.single("file")],

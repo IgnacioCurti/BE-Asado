@@ -69,4 +69,20 @@ export class GroupController {
       .status(STATUS_CODES.OK)
       .json(await this.invitations.invite(req.params.group, req.user._id, req.body?.emails));
   };
+
+  acceptInvitation = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.invitations.accept(req.user._id, req.body?.token));
+  };
+
+  listInvitations = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res.status(STATUS_CODES.OK).json(await this.invitations.listPending(req.params.group));
+  };
+
+  revokeInvitation = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.invitations.revoke(req.params.group, req.params.invitation));
+  };
 }

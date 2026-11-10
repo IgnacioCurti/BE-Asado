@@ -28,6 +28,8 @@ import {
   findGroup,
   findImage,
   insertGroupsForMember,
+  findInvitations,
+  updateInvitation,
   newId,
   uniqueGroupCode,
   UserFixture,
@@ -655,11 +657,19 @@ describe("DELETE /api/groups/deleteCoverPhoto/:group/:image", () => {
   });
 });
 
-describe("POST /api/groups/inviteToGroup/:group", () => {
-  const invite = (groupId: string, user: UserFixture, emails: unknown) =>
-    api().post(`/api/groups/inviteToGroup/${groupId}`).set(as(user)).send({ emails });
+// Token del link de un mail de invitación.
+function tokenFrom(mail: { payload: { htmlContent: string } }): string {
+  return decodeURIComponent(mail.payload.htmlContent.match(/\/invitation\/([A-Za-z0-9_%-]+)"/)![1]);
+}
 
-  it("un admin invita: manda un mail con el link y el código del grupo", async () => {
+const invite = (groupId: string, user: UserFixture, emails: unknown) =>
+  api().post(`/api/groups/inviteToGroup/${groupId}`).set(as(user)).send({ emails });
+
+const accept = (user: UserFixture, token: unknown) =>
+  api().put("/api/groups/acceptInvitation").set(as(user)).send({ token });
+
+describe("POST /api/groups/inviteToGroup/:group", () => {
+  it("un admin invita: guarda una invitación pendiente por mail y manda el link con el token", async () => {
     const { admin, group } = await trio();
     const res = await invite(group._id, admin, ["Nuevo@Test.com", "otro@test.com", "nuevo@test.com"]);
 
@@ -668,31 +678,60 @@ describe("POST /api/groups/inviteToGroup/:group", () => {
     expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual(["nuevo@test.com", "otro@test.com"]);
     for (const mail of sentEmails) {
       expect(mail.payload.subject).toBe("FoodSpot | Te invitaron a un grupo");
-      expect(mail.payload.htmlContent).toContain(`https://food-spot.vercel.app/join/${group.code}`);
+      expect(mail.payload.htmlContent).toContain("https://food-spot.vercel.app/invitation/");
+      expect(mail.payload.htmlContent).not.toContain(group.code);
       expect(mail.payload.htmlContent).toContain("<strong>Admin");
     }
+
+    const stored = await findInvitations(group._id);
+    expect(stored.map((i) => [i.email, i.status, i.invitedBy])).toEqual([
+      ["nuevo@test.com", "pending", admin._id],
+      ["otro@test.com", "pending", admin._id],
+    ]);
+    const days = (new Date(stored[0].expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+    expect(days).toBeGreaterThan(6.99);
+    expect(days).toBeLessThanOrEqual(7);
+    // Se guarda el hash, nunca el token del link.
+    expect(stored[0].tokenHash).not.toBe(tokenFrom(sentEmails[0]));
   });
 
-  it("el link del mail sirve para unirse con joinGroup", async () => {
+  it("reinvitar renueva la invitación: el link anterior deja de servir", async () => {
     const { admin, outsider, group } = await trio();
     await invite(group._id, admin, [outsider.email]).expect(200);
-    const code = sentEmails[0].payload.htmlContent.match(/\/join\/([A-Z0-9]{8})/)![1];
-    expect((await api().put("/api/groups/joinGroup").set(as(outsider)).send({ code })).status).toBe(200);
+    await invite(group._id, admin, [outsider.email]).expect(200);
+    const [first, second] = sentEmails.map(tokenFrom);
+
+    expect(await findInvitations(group._id)).toHaveLength(1);
+    expect((await accept(outsider, first)).status).toBe(404);
+    expect((await accept(outsider, second)).status).toBe(200);
   });
 
-  it("a quien ya es miembro no le manda el mail", async () => {
+  it("a quien ya es miembro no le manda el mail ni crea la invitación", async () => {
     const { admin, member, group } = await trio();
     const res = await invite(group._id, admin, [member.email, "nuevo@test.com"]);
     expect(res.body).toEqual({ sent: ["nuevo@test.com"], failed: [], alreadyMembers: [member.email] });
     expect(sentEmails).toHaveLength(1);
+    expect((await findInvitations(group._id)).map((i) => i.email)).toEqual(["nuevo@test.com"]);
   });
 
-  it("si el envío falla, responde 200 con los mails en failed", async () => {
+  it("si el envío falla, responde 200 con los mails en failed y no deja la invitación", async () => {
     const { admin, group } = await trio();
     setBrevoResponseStatus(500);
     const res = await invite(group._id, admin, ["a@test.com"]);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ sent: [], failed: ["a@test.com"], alreadyMembers: [] });
+    expect(await findInvitations(group._id)).toEqual([]);
+  });
+
+  it("más de 50 invitaciones pendientes -> 409 sin mandar nada", async () => {
+    const { admin, group } = await trio();
+    for (let batch = 0; batch < 3; batch++)
+      await invite(group._id, admin, Array.from({ length: 16 }, (_, i) => `b${batch}-${i}@test.com`)).expect(200);
+    sentEmails.length = 0;
+    const res = await invite(group._id, admin, ["x1@test.com", "x2@test.com", "x3@test.com"]);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/at most 50 pending invitations/);
+    expect(sentEmails).toHaveLength(0);
   });
 
   it("emails inválidos, vacíos o más de 20 -> 400 sin mandar nada", async () => {
@@ -710,5 +749,150 @@ describe("POST /api/groups/inviteToGroup/:group", () => {
     const { member, group } = await trio();
     expect((await invite(group._id, member, ["a@test.com"])).status).toBe(403);
     expect(sentEmails).toHaveLength(0);
+  });
+});
+
+describe("PUT /api/groups/acceptInvitation", () => {
+  async function invited() {
+    const ctx = await trio();
+    await invite(ctx.group._id, ctx.admin, [ctx.outsider.email]).expect(200);
+    return { ...ctx, token: tokenFrom(sentEmails[0]) };
+  }
+
+  it("el invitado acepta con su cuenta: entra al grupo y la invitación queda aceptada", async () => {
+    const { outsider, group, token } = await invited();
+    const res = await accept(outsider, token);
+
+    expect(res.status).toBe(200);
+    expect(res.body._id).toBe(group._id);
+    expect(res.body.members.map((m: any) => m._id)).toContain(outsider._id);
+    const [invitation] = await findInvitations(group._id);
+    expect(invitation).toMatchObject({ status: "accepted", acceptedBy: outsider._id });
+  });
+
+  it("el token sirve una sola vez", async () => {
+    const { outsider, token } = await invited();
+    await accept(outsider, token).expect(200);
+    const res = await accept(outsider, token);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ message: "The invitation is not valid." });
+  });
+
+  it("con otra cuenta (otro mail) -> 403 y no entra", async () => {
+    const { group, token } = await invited();
+    const other = await createUser();
+    const res = await accept(other, token);
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: "The invitation was sent to another email." });
+    expect((await findGroup(group._id))!.members).not.toContain(other._id);
+    expect((await findInvitations(group._id))[0].status).toBe("pending");
+  });
+
+  it("vencida -> 409", async () => {
+    const { outsider, group, token } = await invited();
+    const [invitation] = await findInvitations(group._id);
+    await updateInvitation(invitation._id, { expiresAt: new Date(Date.now() - 1000) });
+    const res = await accept(outsider, token);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/expired/);
+  });
+
+  it("revocada -> 404", async () => {
+    const { admin, outsider, group, token } = await invited();
+    const [invitation] = await findInvitations(group._id);
+    await api().delete(`/api/groups/revokeInvitation/${group._id}/${invitation._id}`).set(as(admin)).expect(200);
+    expect((await accept(outsider, token)).status).toBe(404);
+  });
+
+  it("si ya entró con el código -> 409 y la invitación deja de estar pendiente", async () => {
+    const { outsider, group, token } = await invited();
+    await api().put("/api/groups/joinGroup").set(as(outsider)).send({ code: group.code }).expect(200);
+    const res = await accept(outsider, token);
+    expect(res.status).toBe(409);
+    expect((await findInvitations(group._id))[0].status).toBe("accepted");
+  });
+
+  it("grupo lleno -> 409 y la invitación sigue pendiente", async () => {
+    const { admin, outsider } = await trio();
+    const filler = Array.from({ length: 199 }, () => newId());
+    const group = await createGroup({ members: [admin._id, ...filler], admins: [admin._id] });
+    await invite(group._id, admin, [outsider.email]).expect(200);
+    const res = await accept(outsider, tokenFrom(sentEmails[0]));
+    expect(res.status).toBe(409);
+    expect((await findInvitations(group._id))[0].status).toBe("pending");
+  });
+
+  it("token inexistente -> 404; sin token -> 400; sin sesión -> 401", async () => {
+    const { outsider } = await trio();
+    expect((await accept(outsider, "no-existe")).status).toBe(404);
+    expect((await accept(outsider, undefined)).status).toBe(400);
+    expect((await api().put("/api/groups/acceptInvitation").send({ token: "x" })).status).toBe(401);
+  });
+});
+
+describe("GET /api/groups/getInvitations/:group", () => {
+  it("un admin ve las pendientes vigentes, sin el hash del token", async () => {
+    const { admin, group } = await trio();
+    await invite(group._id, admin, ["a@test.com", "b@test.com", "c@test.com"]).expect(200);
+    const [a, b] = await findInvitations(group._id);
+    await updateInvitation(a._id, { expiresAt: new Date(Date.now() - 1000) });
+    await updateInvitation(b._id, { status: "revoked" });
+
+    const res = await api().get(`/api/groups/getInvitations/${group._id}`).set(as(admin));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      {
+        _id: expect.any(String),
+        email: "c@test.com",
+        invitedBy: { _id: admin._id, name: "Admin", lastName: expect.anything() },
+        expiresAt: expect.any(String),
+        createdAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("un miembro que no es admin -> 403", async () => {
+    const { member, group } = await trio();
+    expect((await api().get(`/api/groups/getInvitations/${group._id}`).set(as(member))).status).toBe(403);
+  });
+});
+
+describe("DELETE /api/groups/revokeInvitation/:group/:invitation", () => {
+  it("un admin revoca una pendiente", async () => {
+    const { admin, group } = await trio();
+    await invite(group._id, admin, ["a@test.com"]).expect(200);
+    const [invitation] = await findInvitations(group._id);
+    const res = await api().delete(`/api/groups/revokeInvitation/${group._id}/${invitation._id}`).set(as(admin));
+    expect(res.status).toBe(200);
+    expect((await findInvitations(group._id))[0].status).toBe("revoked");
+  });
+
+  it("una invitación de otro grupo o ya revocada -> 404; id mal formado -> 400", async () => {
+    const { admin, group } = await trio();
+    const other = await createGroup({ members: [admin._id] });
+    await invite(other._id, admin, ["a@test.com"]).expect(200);
+    const [foreign] = await findInvitations(other._id);
+    expect((await api().delete(`/api/groups/revokeInvitation/${group._id}/${foreign._id}`).set(as(admin))).status).toBe(404);
+    await api().delete(`/api/groups/revokeInvitation/${other._id}/${foreign._id}`).set(as(admin)).expect(200);
+    expect((await api().delete(`/api/groups/revokeInvitation/${other._id}/${foreign._id}`).set(as(admin))).status).toBe(404);
+    expect((await api().delete(`/api/groups/revokeInvitation/${group._id}/abc`).set(as(admin))).status).toBe(400);
+  });
+
+  it("un miembro que no es admin -> 403", async () => {
+    const { admin, member, group } = await trio();
+    await invite(group._id, admin, ["a@test.com"]).expect(200);
+    const [invitation] = await findInvitations(group._id);
+    expect((await api().delete(`/api/groups/revokeInvitation/${group._id}/${invitation._id}`).set(as(member))).status).toBe(403);
+  });
+});
+
+describe("Borrado del grupo e invitaciones", () => {
+  it("cuando sale el último miembro, se borran también las invitaciones del grupo", async () => {
+    const admin = await createUser();
+    const group = await createGroup({ members: [admin._id] });
+    await invite(group._id, admin, ["a@test.com"]).expect(200);
+    await api().put(`/api/groups/leaveGroup/${group._id}`).set(as(admin)).expect(200);
+    expect(await findInvitations(group._id)).toEqual([]);
   });
 });

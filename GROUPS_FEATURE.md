@@ -1,6 +1,6 @@
 # Feature: Grupos
 
-> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 8 del plan (sección 9).
+> Estado: **diseño cerrado (2026-10-27)**. Implementados los pasos 1 a 9 del plan (sección 9).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante. El registro completo está en la sección 10.
 
 ## 1. Problema
@@ -132,7 +132,13 @@ Un admin ingresa uno o varios mails. El backend envía un mail con el link `http
 **B. Invitaciones con token propio (objetivo).**
 Una colección `Invitation { group, email, invitedBy, tokenHash, expiresAt, status }`. El link lleva un token de un solo uso. Al aceptarlo se verifica que el mail del usuario logueado coincida con el invitado.
 - ➕ Las invitaciones se pueden rastrear y revocar, vencen y quedan atadas a una persona.
-- ⏸️ A definir al implementar B: ¿qué pasa si la persona se registra con otro mail? ¿El código del grupo sigue existiendo junto a las invitaciones?
+- ✅ **Implementada en el paso 9** (reemplaza a la A). Decisiones (2026-11-10):
+  - **El mail tiene que coincidir:** solo acepta la invitación un usuario logueado con el mail invitado (si no, 403). Si la persona usa otro mail, el admin la vuelve a invitar.
+  - **El código del grupo sigue existiendo** junto a las invitaciones: `joinGroup` y `regenerateCode` no cambian. Regenerar el código ya no afecta a las invitaciones.
+  - **Vencen a los 7 días.** Reinvitar a un mail con invitación pendiente la renueva (token nuevo y otros 7 días; el link anterior deja de servir).
+  - Máximo **50 pendientes por grupo** (409), para acotar el envío masivo de mails mientras no haya rate limiting.
+  - El token (32 bytes aleatorios) solo viaja en el link; en la base se guarda su hash sha256.
+  - Se agregan `getInvitations` (pendientes vigentes) y `revokeInvitation` para los admins. Al borrarse el grupo se borran sus invitaciones.
 
 Para que A no limite a B: `inviteToGroup` recibe `{ emails: [] }` en ambas versiones. Lo único que cambia es el contenido del mail y que se agrega un endpoint `acceptInvitation`.
 
@@ -333,7 +339,13 @@ Siguiendo la convención actual (`/recurso/verboRecurso/:params`):
 | GET | `/events/getGroupEvents/:group` | `auth, groupMember` | Listado de eventos para la UI del grupo |
 
 Pendientes según lo que se evalúe en 4.5: `removeAdmin` (o `renounceAdmin`), `removeMember` y `deleteGroup`.
-Para la opción B (4.3) se agrega: `acceptInvitation`.
+Para la opción B (4.3) se agregaron ✅ (paso 9):
+
+| Método | Ruta | Middlewares | Descripción |
+|---|---|---|---|
+| PUT | `/groups/acceptInvitation` | `auth` | Body `{ token }` |
+| GET | `/groups/getInvitations/:group` | `auth, groupAdmin` | Invitaciones pendientes y vigentes |
+| DELETE | `/groups/revokeInvitation/:group/:invitation` | `auth, groupAdmin` | Revoca una pendiente |
 
 Cambios en los endpoints de eventos:
 
@@ -360,6 +372,8 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 | Miembros por grupo | **200** ✅ | `joinGroup` (y `acceptInvitation` en la opción B) | 409 |
 | Grupos por usuario (creados + unidos) | **100** ✅ | `createGroup`, `joinGroup` | 409 |
 | Fotos de portada por grupo | **5** ✅ | `addCoverPhoto` | 409 |
+| Invitaciones pendientes por grupo | **50** ✅ | `inviteToGroup` | 409 |
+| Mails por pedido de invitación | **20** ✅ | `inviteToGroup` | 400 |
 
 - El tope de 200 miembros se aplica de forma atómica, en el mismo update: `findOneAndUpdate({ code, "members.199": { $exists: false } }, { $addToSet: { members } })`. Así dos ingresos simultáneos no pueden pasarse del límite.
 - Propuesta: **no** validar que el `memberLimit` de un evento sea menor o igual a la cantidad de miembros del grupo, porque el grupo puede crecer después.
@@ -392,7 +406,7 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
    - Se eliminan `isPrivate` (schema, alta y edición), `getPublicEvents`, `getEvents` y `getPublicAndPrivateEvents`.
    - Nuevo `GET /events/getMyEvents`: eventos de todos los grupos del usuario, en el formato resumido de `getPublicAndPrivateEvents` más `group: { _id, name }` e `isMember` (si el usuario está anotado), para que la home no tenga que pedir cada evento.
    - `EventMapper` ya no completa valores por defecto para eventos viejos.
-9. Invitaciones por mail, opción B.
+9. Invitaciones por mail, opción B. ✅ (rama `t/groups-model`): colección `Invitation`, `inviteToGroup` manda el link `https://food-spot.vercel.app/invitation/<token>`, y nuevos `acceptInvitation`, `getInvitations` y `revokeInvitation` (ver 4.3).
 10. `FRONTEND_CHANGES.md` actualizado en cada paso.
 
 ## 10. Registro de decisiones
@@ -402,7 +416,8 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
 | 1 | Un evento pertenece a exactamente un grupo | ✅ |
 | 2 | Un usuario puede estar en varios grupos | ✅ |
 | 3 | Desaparecen los eventos públicos: se eliminan `isPrivate` y `getPublicEvents` | ✅ 2026-10-27 |
-| 4 | Invitaciones: empezar con la opción A (mail con el código), la meta es la B (token propio) | ✅ 2026-10-27 |
+| 4 | Invitaciones: empezar con la opción A (mail con el código), la meta es la B (token propio) | ✅ 2026-10-27 (B implementada en el paso 9) |
+| 4b | Opción B: el mail del usuario tiene que coincidir con el invitado; el código convive con las invitaciones; vencen a los 7 días | ✅ 2026-11-10 |
 | 5 | No se puede salir del grupo con deudas pendientes ni siendo chef/designee de un evento activo | ✅ 2026-10-27 |
 | 6 | El admin solo puede renombrar, invitar, hacer admin a otros y cambiar las portadas. No gestiona eventos ajenos | ✅ 2026-10-27 |
 | 7 | Varios admins por grupo (`admins[]`), siempre al menos uno | ✅ 2026-10-27 (se deduce de 6) |
