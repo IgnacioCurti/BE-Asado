@@ -28,8 +28,8 @@ BE-Asado currently exposes action-oriented endpoints.
 Examples include:
 
 ```text
-GET    /events/getEvents
-GET    /events/getPublicEvents
+GET    /events/getMyEvents
+GET    /events/getGroupEvents/:group
 GET    /events/getEventById/:id
 
 POST   /events/createEvent

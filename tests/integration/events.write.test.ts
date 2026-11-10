@@ -69,9 +69,9 @@ describe("POST /api/events/createEvent", () => {
       purchaseReceipts: [],
       ratings: [],
       options: [],
-      isPrivate: false,
       penalization: null,
     });
+    expect(res.body).not.toHaveProperty("isPrivate");
     expect(await findEvent(res.body._id)).not.toBeNull();
   });
 
@@ -204,13 +204,15 @@ describe("POST /api/events/createEvent", () => {
     expect(res.body.members).toEqual([]);
   });
 
-  it("acepta isPrivate, penalization y penalizationStartDate", async () => {
+  it("acepta penalization y penalizationStartDate; ignora isPrivate", async () => {
     const organizer = await createUser();
     const res = await api()
       .post("/api/events/createEvent")
       .set(auth(organizer.token))
       .send(await eventBody(organizer, { isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" }));
-    expect(res.body).toMatchObject({ isPrivate: true, penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" });
+    expect(res.body).toMatchObject({ penalization: 200, penalizationStartDate: "2030-01-15T12:00:00.000Z" });
+    expect(res.body).not.toHaveProperty("isPrivate");
+    expect(await findEvent(res.body._id)).not.toHaveProperty("isPrivate");
   });
 
   it.each(["title", "description", "datetime", "memberLimit"])(
@@ -261,10 +263,10 @@ describe("POST /api/events/createEvent", () => {
       ]);
     });
 
-    it("crea siempre un recordatorio newEvent con fecha = ahora - 3 horas, también si el evento es privado", async () => {
+    it("crea un recordatorio newEvent con fecha = ahora - 3 horas", async () => {
       const organizer = await createUser();
       const before = Date.now();
-      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer, { isPrivate: true }));
+      const res = await api().post("/api/events/createEvent").set(auth(organizer.token)).send(await eventBody(organizer));
       const after = Date.now();
       const newEvent = (await remindersByType(res.body._id)).newEvent;
       expect(newEvent).toHaveLength(1);
@@ -338,17 +340,6 @@ describe("POST /api/events/createEvent", () => {
         expect(mail.payload.htmlContent).toContain(`https://food-spot.vercel.app/event/${res.body._id}`);
         expect(mail.payload.htmlContent).toContain("<strong>Amigos</strong>");
       }
-    });
-
-    it("un evento privado también notifica al grupo", async () => {
-      const organizer = await createUser();
-      const member = await createUser({ notifications: { newEvent: true } as any });
-      await api()
-        .post("/api/events/createEvent")
-        .set(auth(organizer.token))
-        .send(await groupEventBody(organizer, [member], { isPrivate: true }));
-      await api().get("/api/cron/reminderCheck").expect(200);
-      expect(sentEmails.map((m) => m.payload.to[0].email)).toEqual([member.email]);
     });
 
     it("usa los miembros del grupo al momento del cron: incluye a quien entró y excluye a quien salió", async () => {
@@ -439,14 +430,6 @@ describe("PUT /api/events/subscribeToAnEvent/:id/:event", () => {
     expect(res.status).toBe(403);
   });
 
-  it("un miembro del grupo se une aunque el evento sea privado", async () => {
-    const organizer = await createUser();
-    const me = await createUser();
-    const event = await createEvent({ organizer: organizer._id, isPrivate: true });
-    await addGroupMembers(event.group, [me._id]);
-    const res = await api().put(`/api/events/subscribeToAnEvent/${me._id}/${event._id}`).set(auth(me.token));
-    expect(res.status).toBe(200);
-  });
 
   it("evento lleno -> 400", async () => {
     const organizer = await createUser();
@@ -783,7 +766,6 @@ describe("PUT /api/events/editEvent/:id", () => {
       penalization: 0,
       penalizationStartDate: null,
       state: "available",
-      isPrivate: false,
       ...overrides,
     };
   }
@@ -814,10 +796,10 @@ describe("PUT /api/events/editEvent/:id", () => {
       description: "nueva descripción",
       memberLimit: 20,
       state: "closed",
-      isPrivate: true,
       penalization: 50,
       penalizationStartDate: "2030-03-10T00:00:00.000Z",
     });
+    expect(res.body).not.toHaveProperty("isPrivate");
     expect(await findEvent(event._id)).toMatchObject({ title: "Asado editado", state: "closed" });
   });
 

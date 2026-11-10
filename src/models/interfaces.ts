@@ -158,7 +158,6 @@ export interface IEvent extends Document {
   purchaseReceipts: mongoose.Types.ObjectId[];
   ratings: mongoose.Types.ObjectId[];
   options: mongoose.Types.ObjectId[];
-  isPrivate?: boolean;
   penalization?: number | null;
   penalizationStartDate?: Date | null;
 }
@@ -185,7 +184,9 @@ export interface IPublicEventPreReduction
     | "organizer"
     | "transferReceipts"
     | "purchaseReceipts"
+    | "group"
   > {
+  group: { _id: mongoose.Types.ObjectId; name: string };
   ratings: IRating[];
   shoppingDesignee: IUser[];
   chef: {
@@ -201,7 +202,7 @@ export interface IPublicEvent {
   memberLimit: number;
   state: string;
   shoppingDesignee?: IUser[];
-  isPrivate?: boolean;
+  group: { _id: mongoose.Types.ObjectId; name: string };
   penalization?: number | null;
   penalizationStartDate?: Date | null;
   members: number;

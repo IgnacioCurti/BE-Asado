@@ -86,8 +86,6 @@ const eventSchema: mongoose.Schema<IEvent> = new mongoose.Schema<IEvent>({
     default: [],
   },
 
-  isPrivate: { type: Boolean, default: false },
-
   penalization: { type: Number, default: null, min: 0 },
 
   penalizationStartDate: { type: Date },

@@ -698,3 +698,33 @@ El contrato no cambia cuando llegue la opción B (invitaciones con token): solo 
 #### Cómo adaptar el front (probable)
 - Ruta `/join/:code`: si no hay sesión, mandar a login o registro conservando el código; después llamar a `PUT /api/groups/joinGroup` con `{ code }` (ya existía, §27).
 - Pantalla de invitar para admins: mostrar `sent`, `failed` y `alreadyMembers`.
+
+---
+
+### 32. Fin de los eventos públicos: `getMyEvents` y sin `isPrivate`
+
+**Estado:** implementado (rama `t/groups-model`) · **Requiere cambios en el front:** sí · **Origen:** GROUPS_FEATURE §3.3, §5.2, paso 8
+
+#### Endpoints eliminados (responden **404**)
+- `GET /api/events/getPublicEvents`
+- `GET /api/events/getEvents`
+- `GET /api/events/getPublicAndPrivateEvents`
+
+#### Endpoint nuevo
+`GET /api/events/getMyEvents` (requiere token): **200** con los eventos de **todos los grupos del usuario**, sea o no miembro de cada evento, ordenados por fecha del evento descendente.
+
+Usa el mismo formato resumido que tenía `getPublicAndPrivateEvents` (sin `organizer`, `members` como cantidad, `chef` como nombre, `ratings` como `{ avgScore, ratingsAmount }`, `shoppingDesignee` poblado sin datos sensibles), con dos cambios:
+- **nuevo** `group: { _id, name }`;
+- **sin** `isPrivate`.
+
+Si el usuario no tiene grupos, devuelve `[]`. Para la pantalla de un grupo sigue estando `getGroupEvents/:group` (§28).
+
+#### `isPrivate` desaparece
+- `createEvent` y `editEvent` ignoran `isPrivate` si viene en el body.
+- Ningún evento lo devuelve (`getEventById`, `getGroupEvents`, respuestas de alta y edición).
+- La privacidad la da el grupo: un evento solo lo ven los miembros de su grupo (§28).
+
+#### Cómo adaptar el front (probable)
+- Reemplazar las llamadas a `getPublicEvents`, `getEvents` y `getPublicAndPrivateEvents` por `getMyEvents` (o `getGroupEvents` dentro de un grupo). La home deja de funcionar sin sesión.
+- Mostrar el nombre del grupo en las tarjetas con `group.name`.
+- Sacar el switch de "evento privado" de los formularios de alta y edición.

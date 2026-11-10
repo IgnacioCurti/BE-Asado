@@ -15,13 +15,13 @@ describe("App: raíz, CORS y parsing", () => {
   });
 
   it("las rutas no llevan barra final obligatoria ni distinguen mayúsculas (default de Express)", async () => {
-    expect((await api().get("/api/events/getPublicEvents/")).status).toBe(200);
-    expect((await api().get("/api/events/getpublicevents")).status).toBe(200);
+    expect((await api().get("/api/cron/reminderCheck/")).status).toBe(200);
+    expect((await api().get("/api/cron/remindercheck")).status).toBe(200);
   });
 
   it("preflight CORS: refleja el origin y anuncia métodos y headers permitidos", async () => {
     const res = await api()
-      .options("/api/events/getPublicEvents")
+      .options("/api/events/getMyEvents")
       .set("Origin", "https://food-spot.vercel.app")
       .set("Access-Control-Request-Method", "POST");
     expect(res.status).toBe(204);
@@ -71,8 +71,7 @@ const ID = "507f1f77bcf86cd799439011";
 const ID2 = "507f1f77bcf86cd799439012";
 
 const protectedRoutes: [string, string][] = [
-  ["get", "/api/events/getEvents"],
-  ["get", "/api/events/getPublicAndPrivateEvents"],
+  ["get", "/api/events/getMyEvents"],
   ["get", `/api/events/getEventById/${ID}`],
   ["get", `/api/events/getMembersAndReceiptsInfo/${ID}`],
   ["get", `/api/events/getMembersAmount/${ID}`],
@@ -124,7 +123,6 @@ const protectedRoutes: [string, string][] = [
 
 // Rutas que NO exigen token (algunas probablemente deberían; ver tests de cada recurso).
 const publicRoutes: [string, string, number][] = [
-  ["get", "/api/events/getPublicEvents", 200],
   ["get", "/api/cron/reminderCheck", 200],
 ];
 

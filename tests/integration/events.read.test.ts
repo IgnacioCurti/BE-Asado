@@ -9,7 +9,6 @@ import {
   createRating,
   createTransferReceipt,
   createUser,
-  insertRawEvent,
   newId,
   removeGroupMember,
 } from "../helpers/fixtures.js";
@@ -19,7 +18,7 @@ const PUBLIC_EVENT_KEYS = [
   "chef",
   "datetime",
   "description",
-  "isPrivate",
+  "group",
   "memberLimit",
   "members",
   "penalization",
@@ -30,60 +29,19 @@ const PUBLIC_EVENT_KEYS = [
   "title",
 ].sort();
 
-describe("GET /api/events/getEvents", () => {
-  it("devuelve los públicos y los privados de los que es miembro, ordenados por fecha descendente, sin poblar", async () => {
-    const user = await createUser();
-    const stranger = await createUser();
-    const old = await createEvent({ organizer: user._id, title: "viejo", datetime: "2029-01-01T00:00:00Z" });
-    const priv = await createEvent({ organizer: user._id, title: "privado", isPrivate: true, datetime: "2031-01-01T00:00:00Z" });
-    const mid = await createEvent({ organizer: user._id, title: "medio", datetime: "2030-01-01T00:00:00Z" });
-    await createEvent({ organizer: stranger._id, title: "privado ajeno", isPrivate: true, datetime: "2032-01-01T00:00:00Z" });
-
-    const res = await api().get("/api/events/getEvents").set(auth(user.token));
-
-    expect(res.status).toBe(200);
-    expect(res.body.map((e: any) => e._id)).toEqual([priv._id, mid._id, old._id]);
-    expect(res.body[0]).toMatchObject({
-      title: "privado",
-      organizer: user._id,
-      members: [user._id],
-      isPrivate: true,
-      state: "available",
-    });
-  });
-
-  it("a igual fecha desempata por _id ascendente", async () => {
-    const user = await createUser();
-    const lowerId = newId();
-    const higherId = newId();
-    await createEvent({ _id: higherId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
-    await createEvent({ _id: lowerId, organizer: user._id, datetime: "2030-01-01T00:00:00Z" });
-
-    const res = await api().get("/api/events/getEvents").set(auth(user.token));
-
-    expect(res.body.map((e: any) => e._id)).toEqual([lowerId, higherId]);
-  });
-
-  it("devuelve [] si no hay eventos", async () => {
-    const user = await createUser();
-    const res = await api().get("/api/events/getEvents").set(auth(user.token));
-    expect(res.body).toEqual([]);
-  });
-});
-
 describe("GET /api/events/getGroupEvents/:group", () => {
   it("devuelve solo los eventos del grupo, ordenados por fecha descendente, sin poblar", async () => {
     const me = await createUser();
     const other = await createUser();
     const group = await createGroup({ members: [me._id, other._id] });
     const old = await createEvent({ organizer: other._id, group: group._id, members: [], datetime: "2029-01-01T00:00:00Z" });
-    const priv = await createEvent({ organizer: other._id, group: group._id, members: [], isPrivate: true, datetime: "2031-01-01T00:00:00Z" });
+    const recent = await createEvent({ organizer: other._id, group: group._id, members: [], datetime: "2031-01-01T00:00:00Z" });
     await createEvent({ organizer: me._id, title: "de otro grupo" });
 
     const res = await api().get(`/api/events/getGroupEvents/${group._id}`).set(auth(me.token));
 
     expect(res.status).toBe(200);
-    expect(res.body.map((e: any) => e._id)).toEqual([priv._id, old._id]);
+    expect(res.body.map((e: any) => e._id)).toEqual([recent._id, old._id]);
     expect(res.body[0]).toMatchObject({ group: group._id, organizer: other._id, members: [] });
   });
 
@@ -111,13 +69,17 @@ describe("GET /api/events/getGroupEvents/:group", () => {
   });
 });
 
-describe("GET /api/events/getPublicEvents", () => {
-  it("devuelve solo eventos no privados, con información reducida", async () => {
+describe("GET /api/events/getMyEvents", () => {
+  const getMine = (user: { token: string }) => api().get("/api/events/getMyEvents").set(auth(user.token));
+
+  it("devuelve los eventos de todos mis grupos, con información reducida y el grupo", async () => {
     const organizer = await createUser();
     const chef = await createUser({ name: "Chef" });
     const member = await createUser();
+    const group = await createGroup({ name: "Amigos", members: [organizer._id, chef._id, member._id] });
     const event = await createEvent({
       organizer: organizer._id,
+      group: group._id,
       chef: chef._id,
       members: [organizer._id, chef._id, member._id],
       shoppingDesignee: [organizer._id],
@@ -128,16 +90,16 @@ describe("GET /api/events/getPublicEvents", () => {
     });
     await createRating({ event: event._id, user: member._id, score: 4 });
     await createRating({ event: event._id, user: chef._id, score: 5 });
-    await createEvent({ organizer: organizer._id, isPrivate: true });
 
-    const res = await api().get("/api/events/getPublicEvents");
+    const res = await getMine(member);
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
-    const [publicEvent] = res.body;
-    expect(Object.keys(publicEvent).sort()).toEqual(PUBLIC_EVENT_KEYS);
-    expect(publicEvent).toMatchObject({
+    const [summary] = res.body;
+    expect(Object.keys(summary).sort()).toEqual(PUBLIC_EVENT_KEYS);
+    expect(summary).toMatchObject({
       _id: event._id,
+      group: { _id: group._id, name: "Amigos" },
       title: event.title,
       description: event.description,
       datetime: event.datetime,
@@ -146,20 +108,43 @@ describe("GET /api/events/getPublicEvents", () => {
       memberLimit: 12,
       members: 3,
       ratings: { avgScore: 4.5, ratingsAmount: 2 },
-      isPrivate: false,
       penalization: 100,
       penalizationStartDate: "2030-02-01T00:00:00.000Z",
     });
-    expect(publicEvent).not.toHaveProperty("organizer");
-    expect(publicEvent.shoppingDesignee).toHaveLength(1);
-    expect(publicEvent.shoppingDesignee[0]).toMatchObject({ _id: organizer._id, name: organizer.name });
+    expect(summary).not.toHaveProperty("organizer");
+    expect(summary.shoppingDesignee).toHaveLength(1);
+    expect(summary.shoppingDesignee[0]).toMatchObject({ _id: organizer._id, name: organizer.name });
+  });
+
+  it("mezcla mis grupos, excluye los ajenos e incluye eventos de los que no soy miembro", async () => {
+    const me = await createUser();
+    const other = await createUser();
+    const g1 = await createGroup({ members: [me._id, other._id] });
+    const g2 = await createGroup({ members: [other._id, me._id] });
+    const a = await createEvent({ organizer: other._id, group: g1._id, members: [other._id], datetime: "2030-01-01T00:00:00Z" });
+    const b = await createEvent({ organizer: other._id, group: g2._id, members: [other._id], datetime: "2032-01-01T00:00:00Z" });
+    await createEvent({ organizer: other._id, title: "ajeno", datetime: "2033-01-01T00:00:00Z" });
+
+    const res = await getMine(me);
+
+    expect(res.body.map((e: any) => e._id)).toEqual([b._id, a._id]);
+    expect(res.body.map((e: any) => e.group._id)).toEqual([g2._id, g1._id]);
+  });
+
+  it("al salir de un grupo dejan de aparecer sus eventos", async () => {
+    const me = await createUser();
+    const other = await createUser();
+    const event = await createEvent({ organizer: other._id, members: [other._id, me._id] });
+    await addGroupMembers(event.group, [me._id]);
+    expect((await getMine(me)).body).toHaveLength(1);
+    await removeGroupMember(event.group, me._id);
+    expect((await getMine(me)).body).toEqual([]);
   });
 
   it("los shoppingDesignee poblados no incluyen el hash ni los datos del código de recuperación", async () => {
     const organizer = await createUser({ verificationCodePlain: "123456" });
     await createEvent({ organizer: organizer._id, shoppingDesignee: [organizer._id] });
-    const res = await api().get("/api/events/getPublicEvents");
-    const designee = res.body[0].shoppingDesignee[0];
+    const designee = (await getMine(organizer)).body[0].shoppingDesignee[0];
     expect(designee).toMatchObject({ _id: organizer._id, name: organizer.name });
     for (const field of ["password", "verificationCode", "verificationCodeExpiresAt", "verificationAttempts"])
       expect(designee).not.toHaveProperty(field);
@@ -168,7 +153,7 @@ describe("GET /api/events/getPublicEvents", () => {
   it("sin chef ni calificaciones: chef null y ratings en 0", async () => {
     const organizer = await createUser();
     await createEvent({ organizer: organizer._id });
-    const [event] = (await api().get("/api/events/getPublicEvents")).body;
+    const [event] = (await getMine(organizer)).body;
     expect(event.chef).toBeNull();
     expect(event.ratings).toEqual({ avgScore: 0, ratingsAmount: 0 });
     expect(event.shoppingDesignee).toEqual([]);
@@ -176,75 +161,22 @@ describe("GET /api/events/getPublicEvents", () => {
     expect(event.penalizationStartDate).toBeNull();
   });
 
-  it("[comportamiento actual] una penalización de 0 se devuelve como null", async () => {
+  it("ordena por fecha descendente y desempata por _id ascendente", async () => {
     const organizer = await createUser();
-    await createEvent({ organizer: organizer._id, penalization: 0 });
-    const [event] = (await api().get("/api/events/getPublicEvents")).body;
-    expect(event.penalization).toBeNull();
+    const group = await createGroup({ members: [organizer._id] });
+    const e = (datetime: string) => createEvent({ organizer: organizer._id, group: group._id, datetime });
+    const a = await e("2030-01-01T00:00:00Z");
+    const b = await e("2032-01-01T00:00:00Z");
+    const c1 = await e("2031-01-01T00:00:00Z");
+    const c2 = await e("2031-01-01T00:00:00Z");
+    const res = await getMine(organizer);
+    expect(res.body.map((x: any) => x._id)).toEqual([b._id, ...[c1._id, c2._id].sort(), a._id]);
   });
 
-  it("ordena por fecha del evento descendente", async () => {
-    const organizer = await createUser();
-    const a = await createEvent({ organizer: organizer._id, datetime: "2030-01-01T00:00:00Z" });
-    const b = await createEvent({ organizer: organizer._id, datetime: "2032-01-01T00:00:00Z" });
-    const c = await createEvent({ organizer: organizer._id, datetime: "2031-01-01T00:00:00Z" });
-    const res = await api().get("/api/events/getPublicEvents");
-    expect(res.body.map((e: any) => e._id)).toEqual([b._id, c._id, a._id]);
-  });
-
-  it("compatibilidad con eventos viejos sin isPrivate/ratings/penalization", async () => {
-    const organizer = await createUser();
-    const legacyId = await insertRawEvent({
-      title: "legado",
-      description: "d",
-      datetime: new Date("2020-01-01T00:00:00Z"),
-      memberLimit: 5,
-      state: "finished",
-      organizer: organizer._id,
-      members: [],
-      chef: null,
-      shoppingDesignee: [],
-    });
-    const res = await api().get("/api/events/getPublicEvents");
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(1);
-    expect(res.body[0]).toMatchObject({
-      _id: legacyId,
-      isPrivate: false,
-      penalization: null,
-      penalizationStartDate: null,
-      ratings: { avgScore: 0, ratingsAmount: 0 },
-      members: 0,
-    });
-  });
-});
-
-describe("GET /api/events/getPublicAndPrivateEvents", () => {
-  it("incluye públicos + privados donde el usuario es miembro, y excluye otros privados", async () => {
+  it("sin grupos -> []", async () => {
     const me = await createUser();
-    const other = await createUser();
-    const pub = await createEvent({ organizer: other._id, title: "publico", datetime: "2030-01-01T00:00:00Z" });
-    const mine = await createEvent({
-      organizer: other._id,
-      members: [other._id, me._id],
-      isPrivate: true,
-      title: "privado mío",
-      datetime: "2031-01-01T00:00:00Z",
-    });
-    await createEvent({ organizer: other._id, isPrivate: true, title: "privado ajeno" });
-
-    const res = await api().get("/api/events/getPublicAndPrivateEvents").set(auth(me.token));
-
+    const res = await getMine(me);
     expect(res.status).toBe(200);
-    expect(res.body.map((e: any) => e._id)).toEqual([mine._id, pub._id]);
-    expect(Object.keys(res.body[0]).sort()).toEqual(PUBLIC_EVENT_KEYS);
-    expect(res.body[0]).toMatchObject({ isPrivate: true, members: 2 });
-  });
-
-  it("[comportamiento actual] un organizador que no es miembro no ve su propio evento privado", async () => {
-    const me = await createUser();
-    await createEvent({ organizer: me._id, members: [], isPrivate: true });
-    const res = await api().get("/api/events/getPublicAndPrivateEvents").set(auth(me.token));
     expect(res.body).toEqual([]);
   });
 });
@@ -336,10 +268,10 @@ describe("GET /api/events/getEventById/:id", () => {
     expect(res.status).toBe(200);
   });
 
-  it("quien no es del grupo ni del evento -> 403, aunque el evento no sea privado", async () => {
+  it("quien no es del grupo ni del evento -> 403", async () => {
     const organizer = await createUser();
     const stranger = await createUser();
-    const event = await createEvent({ organizer: organizer._id, isPrivate: false });
+    const event = await createEvent({ organizer: organizer._id });
     const res = await api().get(`/api/events/getEventById/${event._id}`).set(auth(stranger.token));
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ message: "Access denied. The user is not a member of the event's group." });

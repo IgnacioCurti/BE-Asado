@@ -74,7 +74,6 @@ describe("Ciclo de vida completo de un evento", () => {
       memberLimit: 3,
       penalization: 100,
       penalizationStartDate: "2030-12-27T00:00:00.000Z",
-      isPrivate: false,
     };
     await api().put(`/api/events/editEvent/${eventId}`).set(auth(ana.token)).send({ ...editBase, state: "closed" }).expect(200);
 
@@ -159,8 +158,8 @@ describe("Ciclo de vida completo de un evento", () => {
     // 12. Calificaciones
     await api().post(`/api/ratings/createRating/${eventId}/${beto.id}`).set(auth(beto.token)).send({ score: 5 }).expect(200);
     await api().post(`/api/ratings/createRating/${eventId}/${caro.id}`).set(auth(caro.token)).send({ score: 4 }).expect(200);
-    const publicEvents = await api().get("/api/events/getPublicEvents").expect(200);
-    expect(publicEvents.body[0]).toMatchObject({ _id: eventId, state: "finished", members: 3, ratings: { avgScore: 4.5, ratingsAmount: 2 } });
+    const myEvents = await api().get("/api/events/getMyEvents").set(auth(caro.token)).expect(200);
+    expect(myEvents.body[0]).toMatchObject({ _id: eventId, state: "finished", members: 3, ratings: { avgScore: 4.5, ratingsAmount: 2 } });
 
     // 13. Ana borra el evento
     await api().delete(`/api/events/deleteEvent/${eventId}`).set(auth(ana.token)).expect(200);

@@ -13,6 +13,7 @@ import {
   IEventWithPurchaseReceipts,
   IEventWithPurchaseReceiptsOptions,
   IMemberWhoHasUploaded,
+  IGroup,
   IPublicEvent,
   ITransferInfo,
 } from "../../models/interfaces.js";
@@ -46,7 +47,6 @@ const CREATE_EVENT_FIELDS: string[] = [
   "datetime",
   "description",
   "memberLimit",
-  "isPrivate",
   "penalization",
   "penalizationStartDate",
 ];
@@ -69,7 +69,6 @@ export interface EventEditInput {
   penalization?: number;
   penalizationStartDate?: Date | null;
   state?: string;
-  isPrivate?: boolean;
 }
 
 // Estado completo de los roles que manda el front. Solo se aceptan los cambios
@@ -82,9 +81,7 @@ export interface EventRolesInput {
 export interface EventServiceDeps {
   events: Pick<
     EventRepository,
-    | "findVisibleTo"
-    | "findPublicSummaries"
-    | "findSummariesVisibleTo"
+    | "findSummariesInGroups"
     | "findByIdWithDetails"
     | "findByIdForAmounts"
     | "findByIdWithPurchaseReceiptIds"
@@ -97,7 +94,7 @@ export interface EventServiceDeps {
     | "updateRolesIfAllowed"
     | "findByGroup"
   >;
-  groups: Pick<GroupRepository, "findById" | "hasMember">;
+  groups: Pick<GroupRepository, "findById" | "hasMember" | "findByMember">;
   paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
   users: Pick<UserRepository, "findById">;
   purchaseReceipts: Pick<PurchaseReceiptRepository, "addParticipant" | "save">;
@@ -111,16 +108,12 @@ export interface EventServiceDeps {
 export class EventService {
   constructor(private readonly deps: EventServiceDeps) {}
 
-  listVisibleTo(userId: string): Promise<IEvent[]> {
-    return this.deps.events.findVisibleTo(userId);
-  }
-
-  async listPublic(): Promise<IPublicEvent[]> {
-    return this.deps.mapper.toPublicList(await this.deps.events.findPublicSummaries());
-  }
-
-  async listPublicVisibleTo(userId: string): Promise<IPublicEvent[]> {
-    return this.deps.mapper.toPublicList(await this.deps.events.findSummariesVisibleTo(userId));
+  // Eventos de todos los grupos del usuario (GROUPS_FEATURE §5.2), resumidos y
+  // con el grupo de cada uno, para una vista que mezcle grupos.
+  async listForUser(userId: string): Promise<IPublicEvent[]> {
+    const groups: IGroup[] = await this.deps.groups.findByMember(userId);
+    const groupIds = groups.map((group) => group._id);
+    return this.deps.mapper.toPublicList(await this.deps.events.findSummariesInGroups(groupIds));
   }
 
   // Eventos del grupo para su pantalla. Que el usuario sea miembro lo valida el
@@ -287,7 +280,6 @@ export class EventService {
     event.penalization = input.penalization;
     event.penalizationStartDate = input.penalization > 0 ? input.penalizationStartDate : null;
     event.state = input.state;
-    event.isPrivate = input.isPrivate;
     if (event.shoppingDesignee.length == 0 && event.state !== "available")
       throw new BadRequestError("The event has no shopping designees.");
     await this.deps.events.save(event);

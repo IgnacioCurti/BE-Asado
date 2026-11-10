@@ -166,7 +166,7 @@ describe("Event schema", () => {
     expect([...event.purchaseReceipts]).toEqual([]);
     expect([...event.ratings]).toEqual([]);
     expect([...event.options]).toEqual([]);
-    expect(event.isPrivate).toBe(false);
+    expect(event).not.toHaveProperty("isPrivate");
     expect(event.penalization).toBeNull();
     expect(event.penalizationStartDate).toBeUndefined();
   });
