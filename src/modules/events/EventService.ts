@@ -113,7 +113,10 @@ export class EventService {
   async listForUser(userId: string): Promise<IPublicEvent[]> {
     const groups: IGroup[] = await this.deps.groups.findByMember(userId);
     const groupIds = groups.map((group) => group._id);
-    return this.deps.mapper.toPublicList(await this.deps.events.findSummariesInGroups(groupIds));
+    return this.deps.mapper.toPublicList(
+      await this.deps.events.findSummariesInGroups(groupIds),
+      userId
+    );
   }
 
   // Eventos del grupo para su pantalla. Que el usuario sea miembro lo valida el

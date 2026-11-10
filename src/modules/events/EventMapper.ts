@@ -2,9 +2,9 @@ import { IPublicEvent, IPublicEventPreReduction } from "../../models/interfaces.
 
 // Vista resumida de un evento: sin organizador, members como cantidad, chef
 // como nombre, el grupo como { _id, name } y las calificaciones como promedio
-// y cantidad.
+// y cantidad. isMember dice si quien consulta está anotado en el evento.
 export class EventMapper {
-  toPublic(event: IPublicEventPreReduction): IPublicEvent {
+  toPublic(event: IPublicEventPreReduction, viewerId: string): IPublicEvent {
     const totalScore: number = event.ratings.reduce((sum, rating) => sum + rating.score, 0);
     return {
       _id: event._id,
@@ -17,6 +17,7 @@ export class EventMapper {
       shoppingDesignee: event.shoppingDesignee,
       memberLimit: event.memberLimit,
       members: event.members.length,
+      isMember: event.members.some((member) => String(member) === viewerId),
       ratings: {
         avgScore: event.ratings.length > 0 ? totalScore / event.ratings.length : 0,
         ratingsAmount: event.ratings.length,
@@ -26,7 +27,7 @@ export class EventMapper {
     };
   }
 
-  toPublicList(events: IPublicEventPreReduction[]): IPublicEvent[] {
-    return events.map((event) => this.toPublic(event));
+  toPublicList(events: IPublicEventPreReduction[], viewerId: string): IPublicEvent[] {
+    return events.map((event) => this.toPublic(event, viewerId));
   }
 }
