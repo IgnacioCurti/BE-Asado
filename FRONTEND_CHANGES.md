@@ -713,8 +713,9 @@ El contrato no cambia cuando llegue la opción B (invitaciones con token): solo 
 #### Endpoint nuevo
 `GET /api/events/getMyEvents` (requiere token): **200** con los eventos de **todos los grupos del usuario**, sea o no miembro de cada evento, ordenados por fecha del evento descendente.
 
-Usa el mismo formato resumido que tenía `getPublicAndPrivateEvents` (sin `organizer`, `members` como cantidad, `chef` como nombre, `ratings` como `{ avgScore, ratingsAmount }`, `shoppingDesignee` poblado sin datos sensibles), con dos cambios:
+Usa el mismo formato resumido que tenía `getPublicAndPrivateEvents` (sin `organizer`, `members` como cantidad, `chef` como nombre, `ratings` como `{ avgScore, ratingsAmount }`, `shoppingDesignee` poblado sin datos sensibles), con estos cambios:
 - **nuevo** `group: { _id, name }`;
+- **nuevo** `isMember: boolean`: `true` si el usuario del token está anotado en el evento;
 - **sin** `isPrivate`.
 
 Si el usuario no tiene grupos, devuelve `[]`. Para la pantalla de un grupo sigue estando `getGroupEvents/:group` (§28).
@@ -724,7 +725,46 @@ Si el usuario no tiene grupos, devuelve `[]`. Para la pantalla de un grupo sigue
 - Ningún evento lo devuelve (`getEventById`, `getGroupEvents`, respuestas de alta y edición).
 - La privacidad la da el grupo: un evento solo lo ven los miembros de su grupo (§28).
 
-#### Cómo adaptar el front (probable)
-- Reemplazar las llamadas a `getPublicEvents`, `getEvents` y `getPublicAndPrivateEvents` por `getMyEvents` (o `getGroupEvents` dentro de un grupo). La home deja de funcionar sin sesión.
+#### Cómo adaptar el front (revisado contra `foodspot-nextjs`)
+- `src/services/eventServiceServer.ts` y `src/components/Modules/EventHome/EventsContainer/index.tsx`: reemplazar `getPublicEvents` / `getPublicAndPrivateEvents` por `getMyEvents` (o `getGroupEvents` dentro de un grupo). Sin sesión ya no hay eventos para mostrar.
+- `src/models/event.ts`: en `IPublicEvent`, sacar `isPrivate` y agregar `group` e `isMember`.
 - Mostrar el nombre del grupo en las tarjetas con `group.name`.
-- Sacar el switch de "evento privado" de los formularios de alta y edición.
+- `src/components/Modules/CreateEvent` y `src/components/Modules/Event/EditEventForm`: sacar el checkbox de "Evento privado" (y sus textos en `src/localization/*/createEvent.ts`). Al crear, mandar `group`.
+- `src/components/Modules/Event/EventData/index.tsx`: el botón de copiar link se mostraba solo si el evento no era privado; ahora el link sirve siempre para los miembros del grupo.
+- `src/components/Shared/EventCard/CardBody.tsx`: sacar el indicador de privado.
+- `src/components/Modules/Event/ResposibilitiesData/index.tsx`: deja de hacer falta mandar `isPrivate` a `editRoles` (el back lo ignora, no rompe).
+
+#### Sugerencia: usar `isMember` y sacar las N llamadas a `getEventById` de la home
+**Requiere cambios en el front:** recomendado.
+
+Hoy `EventsContainer` llama a `getEventById` **por cada evento** del listado (N + 1 requests por carga de la home) solo para armar `IEventHomeDetails`: `members` como ids (para el filtro "anotados" y saber si el usuario está en el evento), `state`, `memberLimit` e `isPrivate`. Con `getMyEvents` todo eso ya viene en el listado:
+
+| Lo que usa hoy de `getEventById` | Con `getMyEvents` |
+|--|--|
+| `members.some(m => m._id === user.id)` | `isMember` |
+| `state`, `memberLimit` | vienen en el listado |
+| `members.length` | `members` (ya es la cantidad) |
+| `isPrivate` | ya no existe |
+
+Así la home pasa a hacer un solo request y deja de fallar cuando un evento puntual da error.
+
+---
+
+### 33. Bug del front: el estado `cancelled` está mal escrito en el front
+
+**Estado:** pendiente (del front) · **Requiere cambios en el front:** sí · **Origen:** revisión de `foodspot-nextjs` (2026-11-10)
+
+No es un cambio de la API: el back no cambió. El back usa **`cancelled`** (dos "l") y el front compara siempre contra **`'canceled'`** (una "l"), así que ninguna de estas comparaciones coincide nunca:
+
+| Archivo | Efecto hoy con un evento cancelado |
+|--|--|
+| `src/enums/EventState.enum.ts` (`CANCELED = 'canceled'`) | Origen del problema: el valor del enum no coincide con el del back. |
+| `src/components/Modules/EventHome/EventsContainer/index.tsx` (`state !== 'canceled'`) | El evento se sigue mostrando en la home. |
+| `src/hooks/useEventHome.tsx` (`EventStatus.CANCELED` y `case 'canceled'`) | `getEventStatus` cae en `default` y la tarjeta lo muestra como **disponible**. |
+| `src/components/Modules/Event/EventLifecycle/index.tsx` (`=== EventStatesEnum.CANCELED`) | En lugar de ocultarse, se muestra la línea de tiempo del evento. |
+| `src/types/eventState.ts`, `src/localization/*/eventHome.ts` | Usan el mismo valor; revisar al corregir. |
+
+#### Cómo corregirlo
+- Cambiar el valor del enum a `CANCELLED = 'cancelled'` (y el de `EventStatus` en `useEventHome.tsx`).
+- Reemplazar los strings sueltos (`'canceled'`) por el enum.
+- El resto de los estados del enum coincide con el back (`available`, `closed`, `readyforpayment`, `finished`). `full` e `incompleted` no existen en el back: son estados que calcula el front.

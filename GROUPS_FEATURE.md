@@ -390,7 +390,7 @@ Cada cambio de contrato se documenta en `FRONTEND_CHANGES.md`.
    - No se le manda a quien ya es miembro. Un envío fallido no corta el resto. Responde `{ sent, failed, alreadyMembers }`.
 8. Eliminación de `isPrivate`, `getPublicEvents` y el código de compatibilidad con eventos viejos (sin migración, ver 7). ✅ (rama `t/groups-model`):
    - Se eliminan `isPrivate` (schema, alta y edición), `getPublicEvents`, `getEvents` y `getPublicAndPrivateEvents`.
-   - Nuevo `GET /events/getMyEvents`: eventos de todos los grupos del usuario, en el formato resumido de `getPublicAndPrivateEvents` más `group: { _id, name }`.
+   - Nuevo `GET /events/getMyEvents`: eventos de todos los grupos del usuario, en el formato resumido de `getPublicAndPrivateEvents` más `group: { _id, name }` e `isMember` (si el usuario está anotado), para que la home no tenga que pedir cada evento.
    - `EventMapper` ya no completa valores por defecto para eventos viejos.
 9. Invitaciones por mail, opción B.
 10. `FRONTEND_CHANGES.md` actualizado en cada paso.

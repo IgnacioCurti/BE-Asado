@@ -19,6 +19,7 @@ const PUBLIC_EVENT_KEYS = [
   "datetime",
   "description",
   "group",
+  "isMember",
   "memberLimit",
   "members",
   "penalization",
@@ -107,6 +108,7 @@ describe("GET /api/events/getMyEvents", () => {
       chef: "Chef",
       memberLimit: 12,
       members: 3,
+      isMember: true,
       ratings: { avgScore: 4.5, ratingsAmount: 2 },
       penalization: 100,
       penalizationStartDate: "2030-02-01T00:00:00.000Z",
@@ -129,6 +131,22 @@ describe("GET /api/events/getMyEvents", () => {
 
     expect(res.body.map((e: any) => e._id)).toEqual([b._id, a._id]);
     expect(res.body.map((e: any) => e.group._id)).toEqual([g2._id, g1._id]);
+    expect(res.body.map((e: any) => e.isMember)).toEqual([false, false]);
+  });
+
+  it("isMember: true solo en los eventos en los que el usuario está anotado", async () => {
+    const me = await createUser();
+    const other = await createUser();
+    const group = await createGroup({ members: [me._id, other._id] });
+    const joined = await createEvent({ organizer: other._id, group: group._id, members: [other._id, me._id], datetime: "2031-01-01T00:00:00Z" });
+    const notJoined = await createEvent({ organizer: me._id, group: group._id, members: [other._id], datetime: "2030-01-01T00:00:00Z" });
+
+    const res = await getMine(me);
+
+    expect(res.body.map((e: any) => [e._id, e.isMember])).toEqual([
+      [joined._id, true],
+      [notJoined._id, false],
+    ]);
   });
 
   it("al salir de un grupo dejan de aparecer sus eventos", async () => {

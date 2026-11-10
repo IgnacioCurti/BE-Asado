@@ -34,18 +34,20 @@ describe("EventMapper.toPublic", () => {
   };
 
   it("resume miembros, chef y calificaciones", () => {
+    const viewer = id();
     const result = mapper.toPublic({
       ...base,
       chef: { name: "Ana" },
-      members: [id(), id(), id()],
+      members: [id(), viewer, id()],
       ratings: [{ score: 5 }, { score: 2 }],
       group: { _id: groupId, name: "Amigos", code: "K7PX2MQA" },
       penalization: 10,
       penalizationStartDate: new Date("2026-02-01"),
-    } as any);
+    } as any, String(viewer));
     expect(result).toMatchObject({
       chef: "Ana",
       members: 3,
+      isMember: true,
       ratings: { avgScore: 3.5, ratingsAmount: 2 },
       group: { _id: groupId, name: "Amigos" },
       penalization: 10,
@@ -55,8 +57,9 @@ describe("EventMapper.toPublic", () => {
   });
 
   it("sin chef, calificaciones ni penalización: chef null, ratings en 0 y penalización null", () => {
-    const result = mapper.toPublic({ ...base, group: { _id: groupId, name: "g" }, chef: null, members: [], ratings: [], penalization: null } as any);
+    const result = mapper.toPublic({ ...base, group: { _id: groupId, name: "g" }, chef: null, members: [], ratings: [], penalization: null } as any, String(id()));
     expect(result).toMatchObject({
+      isMember: false,
       chef: null,
       ratings: { avgScore: 0, ratingsAmount: 0 },
       penalization: null,

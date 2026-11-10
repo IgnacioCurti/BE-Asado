@@ -206,6 +206,7 @@ export interface IPublicEvent {
   penalization?: number | null;
   penalizationStartDate?: Date | null;
   members: number;
+  isMember: boolean;
   chef: string;
   ratings: {
     avgScore: number;
