@@ -31,11 +31,11 @@ const PUBLIC_EVENT_KEYS = [
 ].sort();
 
 describe("GET /api/events/getGroupEvents/:group", () => {
-  it("devuelve solo los eventos del grupo, ordenados por fecha descendente, sin poblar", async () => {
+  it("devuelve solo los eventos del grupo, ordenados por fecha descendente, en el formato resumido de getMyEvents", async () => {
     const me = await createUser();
     const other = await createUser();
-    const group = await createGroup({ members: [me._id, other._id] });
-    const old = await createEvent({ organizer: other._id, group: group._id, members: [], datetime: "2029-01-01T00:00:00Z" });
+    const group = await createGroup({ name: "Amigos", members: [me._id, other._id] });
+    const old = await createEvent({ organizer: other._id, group: group._id, members: [me._id], datetime: "2029-01-01T00:00:00Z" });
     const recent = await createEvent({ organizer: other._id, group: group._id, members: [], datetime: "2031-01-01T00:00:00Z" });
     await createEvent({ organizer: me._id, title: "de otro grupo" });
 
@@ -43,7 +43,9 @@ describe("GET /api/events/getGroupEvents/:group", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.map((e: any) => e._id)).toEqual([recent._id, old._id]);
-    expect(res.body[0]).toMatchObject({ group: group._id, organizer: other._id, members: [] });
+    expect(Object.keys(res.body[0]).sort()).toEqual(PUBLIC_EVENT_KEYS);
+    expect(res.body[0]).toMatchObject({ group: { _id: group._id, name: "Amigos" }, members: 0, isMember: false });
+    expect(res.body[1]).toMatchObject({ members: 1, isMember: true });
   });
 
   it("grupo sin eventos -> []", async () => {
