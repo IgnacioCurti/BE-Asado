@@ -22,7 +22,7 @@ References:
 | Prefix | Endpoint | Description | Type | Parameters | Auth | Body requirements | Response |
 |--|--|--|--|--|--|--|--|
 | events | getMyEvents | Gets the events of every group of the user, sorted by event date in descendent order | GET |  | Yes |  | [Event] (does not return organizer, members is just the amount of members, chef is just the chef name, group is {_id, name}), ratings is an object with avgScore(Number) and ratingsAmount(Number) |
-| events | getGroupEvents/:group | Gets the events of a group, sorted by event date in descendent order | GET | group | Yes and the user needs to be a member of the group |  | [Event] |
+| events | getGroupEvents/:group | Gets the events of a group, sorted by event date in descendent order | GET | group | Yes and the user needs to be a member of the group |  | [Event] (same summarized format as getMyEvents) |
 | events | getEventById/:id | Gets an event by its id (12 byte Object ID) | GET | id | Yes |  | Event |
 | events | getMembersAndReceiptsInfo/:event | Returns a list of users and their transferReceipt information | GET | event | Yes |  | [{userId(ObjectId), userName(String), userLastName(String), specialDiet(String), transferReceipt(ObjectId or null), hasReceiptApproved(Boolean), hasUploaded(Boolean)}] |
 | events | getMemberIndividualCost/:user/:event | Gets a user's cost by event | GET | user, event | Yes |  | number |

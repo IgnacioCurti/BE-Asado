@@ -10,8 +10,10 @@ export class EventController {
     return res.status(STATUS_CODES.OK).json(await this.service.listForUser(req.user._id));
   };
 
-  listByGroup = async (req: Request, res: Response): Promise<Response> => {
-    return res.status(STATUS_CODES.OK).json(await this.service.listByGroup(req.params.group));
+  listByGroup = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    return res
+      .status(STATUS_CODES.OK)
+      .json(await this.service.listByGroup(req.params.group, req.user._id));
   };
 
   getById = async (req: Request, res: Response): Promise<Response> => {

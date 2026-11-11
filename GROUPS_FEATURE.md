@@ -336,7 +336,7 @@ Siguiendo la convención actual (`/recurso/verboRecurso/:params`):
 | PUT | `/groups/regenerateCode/:group` | `auth, groupAdmin` | Devuelve el código nuevo |
 | POST | `/groups/addCoverPhoto/:group` | `auth, groupAdmin, multerUploadImages.single("file")` | |
 | DELETE | `/groups/deleteCoverPhoto/:group/:image` | `auth, groupAdmin` | |
-| GET | `/events/getGroupEvents/:group` | `auth, groupMember` | Listado de eventos para la UI del grupo |
+| GET | `/events/getGroupEvents/:group` | `auth, groupMember` | Listado de eventos para la UI del grupo, en el mismo formato resumido que `getMyEvents` |
 
 Pendientes según lo que se evalúe en 4.5: `removeAdmin` (o `renounceAdmin`), `removeMember` y `deleteGroup`.
 Para la opción B (4.3) se agregaron ✅ (paso 9):
