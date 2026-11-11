@@ -5,6 +5,8 @@ services:
       - ..:/workspaces/BE-Asado:cached
       # Persiste config, login e historial de chats de Claude Code entre rebuilds del container
       - claude-config:/home/node/.claude
+      # Persiste el login de GitHub CLI (gh) entre rebuilds del container
+      - gh-config:/home/node/.config/gh
     environment:
       # Hace que Claude guarde también .claude.json dentro del volumen (si no, queda en ~/.claude.json y se pierde)
       CLAUDE_CONFIG_DIR: /home/node/.claude
@@ -40,3 +42,4 @@ services:
 volumes:
   mongo-data:
   claude-config:
+  gh-config:

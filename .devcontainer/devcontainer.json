@@ -15,7 +15,7 @@
     "27017": { "label": "MongoDB", "onAutoForward": "silent" }
   },
 
-  "postCreateCommand": "sudo chown -R node:node /home/node/.claude && npm ci",
+  "postCreateCommand": "sudo chown -R node:node /home/node/.claude /home/node/.config/gh && npm ci",
 
   "customizations": {
     "vscode": {
