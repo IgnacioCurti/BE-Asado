@@ -156,11 +156,6 @@ export class EventRepository extends BaseRepository<IEvent> {
   private static readonly SUMMARY_FIELDS: string =
     "datetime description state chef shoppingDesignee memberLimit members title ratings group penalization penalizationStartDate";
 
-  // Más nuevos primero.
-  findByGroup(groupId: string): Promise<IEvent[]> {
-    return this.model.find({ group: groupId }).sort({ datetime: -1, _id: 1 }).exec();
-  }
-
   // Resumen de los eventos de esos grupos, más nuevos primero.
   findSummariesInGroups(groupIds: mongoose.Types.ObjectId[]): Promise<IPublicEventPreReduction[]> {
     return this.model

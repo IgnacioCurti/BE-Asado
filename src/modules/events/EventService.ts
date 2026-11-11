@@ -92,7 +92,6 @@ export interface EventServiceDeps {
     | "build"
     | "deleteCascade"
     | "updateRolesIfAllowed"
-    | "findByGroup"
   >;
   groups: Pick<GroupRepository, "findById" | "hasMember" | "findByMember">;
   paymentStatus: Pick<TransferReceiptService, "membersWhoHaveUploaded">;
@@ -119,10 +118,13 @@ export class EventService {
     );
   }
 
-  // Eventos del grupo para su pantalla. Que el usuario sea miembro lo valida el
-  // middleware groupMember.
-  listByGroup(groupId: string): Promise<IEvent[]> {
-    return this.deps.events.findByGroup(groupId);
+  // Eventos del grupo para su pantalla, en el mismo formato resumido que
+  // listForUser. Que el usuario sea miembro lo valida el middleware groupMember.
+  async listByGroup(groupId: string, userId: string): Promise<IPublicEvent[]> {
+    return this.deps.mapper.toPublicList(
+      await this.deps.events.findSummariesInGroups([new mongoose.Types.ObjectId(groupId)]),
+      userId
+    );
   }
 
   async getDetails(id: string): Promise<IEventPopulatedWithOptions> {

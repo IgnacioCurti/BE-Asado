@@ -4,6 +4,8 @@ Cambios de comportamiento de la API. Para cada uno se detalla qué cambia, por q
 
 También se registran, a modo **informativo**, los cambios del backend que modifican el comportamiento pero no requieren tocar el front.
 
+> **Lanzamiento de grupos (PR #164):** empezar por la sección [Grupos](#grupos). Al principio tiene la nota de lanzamiento y la lista de lo que el front tiene que cambiar.
+
 Cada entrada indica:
 - **Estado:** **pendiente** (decidido, pero todavía no implementado en el backend) o **implementado** (ya está en el backend; indicar rama o commit).
 - **Requiere cambios en el front:** **sí** (el front tiene que adaptarse), **recomendado** (no se rompe nada, pero conviene ajustarlo) o **no** (solo informativo).
@@ -287,6 +289,8 @@ Cualquier usuario logueado podía reemplazar la imagen de cualquier comprobante,
 
 **Estado:** implementado (`5fee9d9`, rama `fix/worktodo-bugs`) · **Requiere cambios en el front:** no (informativo) · **Origen:** WORKTODO A14
 
+> **Reemplazado por §32:** `getEvents` se elimina con la feature de grupos.
+
 ### Por qué
 `GET /api/events/getEvents` devolvía todos los eventos, incluidos los privados de los que el usuario no es miembro.
 
@@ -417,10 +421,37 @@ El código de 6 dígitos no vencía y se podía probar sin límite en `verifyCod
 ## Grupos
 
 Cambios que salieron del trabajo de la feature de grupos (`GROUPS_FEATURE.md`):
-- **§20 a §26:** se hicieron al cerrar los endpoints abiertos (paso 1 del plan) y al resolver `TOFIX.md` (PR #157). Ya están en `dev`.
-- **§27:** son los endpoints nuevos de `/api/groups` (pasos 2 y 3).
+- **§20 a §26:** se hicieron al cerrar los endpoints abiertos (paso 1 del plan) y al resolver `TOFIX.md` (PR #157). Ya están en `main`.
+- **§27 a §34:** son la feature de grupos en sí (pasos 2 a 9 del plan, PR #164).
 
-- **§28:** son los cambios en eventos que llegan con `Event.group` (paso 4).
+### Nota de lanzamiento (PR #164)
+
+- **La base de datos se reinicia por completo** (GROUPS_FEATURE §7): no hay migración. Desaparecen todos los usuarios, eventos e imágenes. Todos tienen que registrarse de nuevo y las sesiones guardadas (tokens) dejan de servir.
+- **Front y back tienen que salir juntos.** Apenas se deploye el back, la home actual deja de andar: `getPublicEvents` y `getPublicAndPrivateEvents` responden **404**, y `createEvent` sin `group` responde **400**.
+- Para probarlo antes, el PR se puede poner en `dev` con el label `deploy-dev`.
+
+### Qué tiene que cambiar el front (resumen)
+
+Obligatorio para que el front siga andando:
+1. **Home:** reemplazar `getPublicEvents` / `getPublicAndPrivateEvents` por `GET /api/events/getMyEvents`. Sin sesión ya no hay eventos para mostrar (§32).
+2. **Tipos de evento:** sacar `isPrivate` y agregar `group: { _id, name }` e `isMember` (§32).
+3. **Crear evento:** mandar `group` y sacar el checkbox de "Evento privado" (§28, §32).
+4. **Link de un evento:** solo sirve para miembros del grupo del evento. Manejar el **403** ofreciendo unirse al grupo (§28).
+
+Pantallas nuevas:
+
+5. **Mis grupos, detalle, crear, unirse con código, salir** (§27, §28). Los **409** de `leaveGroup` hay que mostrarlos.
+6. **Pantalla del grupo:** eventos con `getGroupEvents` (mismo formato que `getMyEvents`), portadas y crear evento en el grupo (§28, §30).
+7. **Acciones de admin:** renombrar, hacer admin, regenerar código, portadas, invitar por mail, listar y revocar invitaciones (§27, §30, §34).
+8. **Rutas de entrada:** `/join/[code]` para el código compartido a mano (§27) y `/invitation/[token]` para los mails de invitación (§34).
+
+Recomendado:
+
+9. **Home sin N+1:** usar `isMember` y los datos de `getMyEvents` en lugar de llamar a `getEventById` por cada evento (§32).
+10. **Organizador que salió del grupo:** ocultarle editar, borrar y gestionar opciones (§28).
+11. **Bug del front:** el estado `cancelled` está mal escrito (§33). No depende de este PR.
+
+Solo informativo: §29 (aviso de evento nuevo por grupo, fin de la limpieza automática). §31 quedó reemplazado por §34.
 
 ### 20. Detalle del evento y pagos: requieren token
 
@@ -437,7 +468,7 @@ Cambios que salieron del trabajo de la feature de grupos (`GROUPS_FEATURE.md`):
 | `GET /api/events/getMembersAndReceiptsInfo/:event` | Público | Exige token (**401**). Si el evento es privado, solo lo ven sus miembros (**403** para el resto). |
 | `GET /api/events/getMembersAmount/:event` | Público | Igual que el anterior. |
 
-Cuando se agregue `Event.group`, la regla pasa a ser "miembro del grupo del evento **o** miembro del evento" (GROUPS_FEATURE §5.1).
+> **Actualizado por §28 y §32:** con `Event.group` la regla pasa a ser "miembro del grupo del evento **o** miembro del evento", e `isPrivate` desaparece.
 
 Errores:
 - id mal formado: **400** `{ message: "Invalid ObjectID" }` en los tres (antes **500**).
@@ -456,7 +487,7 @@ Errores:
 
 **Estado:** implementado (PR #157, `448e21f`) · **Requiere cambios en el front:** no · **Origen:** TOFIX, WORKTODO §2.1
 
-Los usuarios que vienen poblados dentro de un evento (`organizer`, `chef`, `members`, `shoppingDesignee` en `getEventById` y `getPublicEvents`, y `shoppingDesignee`/`participants` en `getPurchaseReceiptsByEvent`) ya no incluyen `password`, `verificationCode`, `verificationCodeExpiresAt` ni `verificationAttempts`. El resto de los campos no cambia.
+Los usuarios que vienen poblados dentro de un evento (`organizer`, `chef`, `members`, `shoppingDesignee` en `getEventById` y en los listados de eventos, y `shoppingDesignee`/`participants` en `getPurchaseReceiptsByEvent`) ya no incluyen `password`, `verificationCode`, `verificationCodeExpiresAt` ni `verificationAttempts`. El resto de los campos no cambia.
 
 ---
 
@@ -537,7 +568,7 @@ Cómo adaptar el front: dejar de mandar `organizer` y `shoppingDesignee`. `membe
 - **`PUT /api/users/editUser/:id`** · **Requiere cambios en el front:** no. Si `alias` o `cbu` no vienen en el body, se conservan (antes se borraban). Para borrarlos, mandarlos vacíos (`""` o `null`).
 - **`GET /api/events/getMembersAmount/:event`** · **Requiere cambios en el front:** no. Un comprobante sin participantes no lo paga nadie: los montos son números (antes podía aparecer `amount: null`).
 - **`DELETE /api/events/deleteEvent/:id`** · **Requiere cambios en el front:** no. Ahora también borra las opciones de votación, y todo el borrado es atómico (o se borra todo o nada).
-- **Limpieza automática al crear un evento** · **Requiere cambios en el front:** no. Solo borra eventos públicos terminados o cancelados; los privados nunca se borran.
+- **Limpieza automática al crear un evento** · **Requiere cambios en el front:** no. Solo borra eventos públicos terminados o cancelados; los privados nunca se borran. *(Después se eliminó por completo: ver §29.)*
 
 ---
 
@@ -558,11 +589,11 @@ Todos exigen token. Errores con `{ message }`. En las rutas con `:group`, un id 
 | `PUT /api/groups/makeAdmin/:group/:user` | Admin | — | **200** con el grupo. Idempotente. **400** si `:user` no es miembro. |
 | `PUT /api/groups/regenerateCode/:group` | Admin | — | **200** `{ code }`. El código anterior deja de servir en el acto. |
 
-Por ahora los eventos no tienen grupo (llega en el paso 4), así que salir de un grupo todavía no revisa deudas ni roles en eventos.
+Las reglas de `leaveGroup` sobre los eventos del grupo (deudas, roles, baja de eventos) están en §28.
 
 #### Cómo adaptar el front (probable)
 - Pantallas de "mis grupos", detalle del grupo, crear grupo y "unirme con código".
-- Link de invitación `https://food-spot.vercel.app/join/<CODE>`: si no hay sesión, mandar a login o registro y después llamar a `joinGroup`.
+- Link para compartir el código `https://food-spot.vercel.app/join/<CODE>`: si no hay sesión, mandar a login o registro y después llamar a `joinGroup`.
 - Mostrar las acciones de admin (renombrar, hacer admin, regenerar código) solo si el usuario está en `admins` (o `isAdmin` en el listado).
 
 ---
@@ -594,9 +625,9 @@ Todo evento pertenece a un grupo. Los eventos traen el campo nuevo `group` (id).
 Quien salió del grupo pero sigue como miembro de un evento (cerrado o terminado) lo sigue viendo.
 
 #### Listado nuevo
-`GET /api/events/getGroupEvents/:group` (miembros del grupo): **200** con los eventos del grupo, más nuevos primero, en el mismo formato que `getEvents` (sin poblar). **400** id mal formado, **404** grupo inexistente, **403** no es miembro.
+`GET /api/events/getGroupEvents/:group` (miembros del grupo): **200** con los eventos del grupo, más nuevos primero, en **el mismo formato resumido que `getMyEvents`** (§32): `group: { _id, name }`, `isMember`, `members` como cantidad, `chef` como nombre, etc. Así la home y la pantalla del grupo pueden usar la misma tarjeta. **400** id mal formado, **404** grupo inexistente, **403** no es miembro.
 
-`getEvents`, `getPublicAndPrivateEvents` y `getPublicEvents` todavía no cambian (siguen mostrando eventos de todos los grupos): ver GROUPS_FEATURE §5.2.
+Los listados viejos (`getEvents`, `getPublicEvents`, `getPublicAndPrivateEvents`) se eliminan: ver §32.
 
 #### Organizador que salió del grupo
 Pierde los permisos de organizador: editar o borrar el evento, gestionar opciones y ver el costo de otros miembros responden **403**. Si sigue siendo miembro del evento, lo puede ver. Los compradores conservan sus permisos.
@@ -720,11 +751,11 @@ Usa el mismo formato resumido que tenía `getPublicAndPrivateEvents` (sin `organ
 - **nuevo** `isMember: boolean`: `true` si el usuario del token está anotado en el evento;
 - **sin** `isPrivate`.
 
-Si el usuario no tiene grupos, devuelve `[]`. Para la pantalla de un grupo sigue estando `getGroupEvents/:group` (§28).
+Si el usuario no tiene grupos, devuelve `[]`. Para la pantalla de un grupo está `getGroupEvents/:group` (§28), que devuelve el mismo formato.
 
 #### `isPrivate` desaparece
 - `createEvent` y `editEvent` ignoran `isPrivate` si viene en el body.
-- Ningún evento lo devuelve (`getEventById`, `getGroupEvents`, respuestas de alta y edición).
+- Ningún evento lo devuelve (`getEventById`, `getMyEvents`, `getGroupEvents`, respuestas de alta y edición).
 - La privacidad la da el grupo: un evento solo lo ven los miembros de su grupo (§28).
 
 #### Cómo adaptar el front (revisado contra `foodspot-nextjs`)

@@ -85,6 +85,20 @@ describe("EventService.listForUser", () => {
   });
 });
 
+describe("EventService.listByGroup", () => {
+  it("resume los eventos del grupo con el mismo formato que listForUser", async () => {
+    const { service, events } = setup();
+    const groupId = id();
+    const viewer = id();
+    events.findSummariesInGroups.mockResolvedValue([
+      { _id: id(), group: { _id: groupId, name: "A" }, chef: null, members: [viewer], ratings: [], shoppingDesignee: [] },
+    ]);
+    const result = await service.listByGroup(String(groupId), String(viewer));
+    expect(events.findSummariesInGroups).toHaveBeenCalledWith([groupId]);
+    expect(result[0]).toMatchObject({ group: { _id: groupId, name: "A" }, members: 1, isMember: true });
+  });
+});
+
 describe("EventService lecturas", () => {
   it("getDetails inexistente -> NotFoundError", async () => {
     const { service, events } = setup();
