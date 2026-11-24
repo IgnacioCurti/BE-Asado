@@ -16,6 +16,7 @@ import { PurchaseReceipt } from "../../../src/models/purchaseReceipt.js";
 import { Option } from "../../../src/models/option.js";
 import { Image } from "../../../src/models/image.js";
 import { Group, GROUP_LIMITS } from "../../../src/models/group.js";
+import { Message, MESSAGE_LIMITS } from "../../../src/models/message.js";
 
 const oid = () => new mongoose.Types.ObjectId();
 
@@ -362,5 +363,26 @@ describe("Group schema", () => {
     const photos = Array.from({ length: GROUP_LIMITS.MAX_COVER_PHOTOS }, oid);
     expect(errorsOf(new Group({ ...valid(), coverPhotos: photos }))).toEqual([]);
     expect(errorsOf(new Group({ ...valid(), coverPhotos: [...photos, oid()] }))).toEqual(["coverPhotos"]);
+  });
+});
+
+describe("Message schema", () => {
+  const valid = () => ({ event: oid(), author: oid(), text: "Llevo el carbón" });
+
+  it("un mensaje mínimo es válido y la hora la pone el schema", () => {
+    const message = new Message(valid());
+    expect(errorsOf(message)).toEqual([]);
+    expect(message.createdAt).toBeInstanceOf(Date);
+  });
+
+  it("event, author y text son obligatorios", () => {
+    expect(errorsOf(new Message({}))).toEqual(["author", "event", "text"]);
+  });
+
+  it("text: se recorta, no puede quedar vacío y tiene como máximo 1000 caracteres", () => {
+    expect(new Message({ ...valid(), text: "  Hola  " }).text).toBe("Hola");
+    expect(errorsOf(new Message({ ...valid(), text: "   " }))).toEqual(["text"]);
+    expect(errorsOf(new Message({ ...valid(), text: "a".repeat(MESSAGE_LIMITS.TEXT_MAX_LENGTH) }))).toEqual([]);
+    expect(errorsOf(new Message({ ...valid(), text: "a".repeat(MESSAGE_LIMITS.TEXT_MAX_LENGTH + 1) }))).toEqual(["text"]);
   });
 });

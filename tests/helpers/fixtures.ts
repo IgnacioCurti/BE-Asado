@@ -17,6 +17,7 @@ import { TransferReceipt } from "../../src/models/transferReceipt.js";
 import { Rating } from "../../src/models/rating.js";
 import { Option } from "../../src/models/option.js";
 import { Reminder } from "../../src/models/reminder.js";
+import { Message } from "../../src/models/message.js";
 import { Image } from "../../src/models/image.js";
 import { Group } from "../../src/models/group.js";
 import { Invitation } from "../../src/models/invitation.js";
@@ -102,6 +103,10 @@ export async function findUser(id: Id): Promise<UserFixture | null> {
 export async function findUserByEmail(email: string): Promise<UserFixture | null> {
   const doc = await User.findOne({ email }).lean();
   return doc ? plain<UserFixture>(doc) : null;
+}
+
+export async function deleteUser(id: Id): Promise<void> {
+  await User.deleteOne({ _id: id });
 }
 
 export async function countUsers(): Promise<number> {
@@ -371,6 +376,24 @@ export async function remindersByType(eventId: Id): Promise<Partial<Record<Remin
 
 export async function countReminders(): Promise<number> {
   return Reminder.countDocuments();
+}
+
+// ---------------------------------------------------------------- messages
+
+export interface MessageFixture {
+  _id: Id;
+  event: Id;
+  author: Id;
+  text: string;
+  createdAt: string;
+}
+
+export async function createMessage(data: { event: Id; author: Id; text?: string; createdAt?: Date }): Promise<MessageFixture> {
+  return plain<MessageFixture>(await Message.create({ text: "Hola", ...data }));
+}
+
+export async function countMessages(): Promise<number> {
+  return Message.countDocuments();
 }
 
 // ---------------------------------------------------------------- images

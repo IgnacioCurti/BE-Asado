@@ -3,6 +3,7 @@ import { runInTransaction } from "../../core/repositories/transaction.js";
 import { UserRepository } from "../users/UserRepository.js";
 import { Event } from "../../models/event.js";
 import { Image } from "../../models/image.js";
+import { Message } from "../../models/message.js";
 import { Option } from "../../models/option.js";
 import { PurchaseReceipt } from "../../models/purchaseReceipt.js";
 import { Rating } from "../../models/rating.js";
@@ -275,6 +276,7 @@ export class EventRepository extends BaseRepository<IEvent> {
     await Rating.deleteMany({ _id: { $in: ids("ratings") } }).session(session).exec();
     await Option.deleteMany({ _id: { $in: ids("options") } }).session(session).exec();
     await Reminder.deleteMany({ event: { $in: eventIds } }).session(session).exec();
+    await Message.deleteMany({ event: { $in: eventIds } }).session(session).exec();
     await this.model.deleteMany({ _id: { $in: eventIds } }).session(session).exec();
   }
 

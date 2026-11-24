@@ -16,13 +16,17 @@ describe("config", () => {
     const config = await importConfig();
     expect(config.jwtPrivateKey).toBe("test-jwt-private-key");
     expect(config.brevo).toEqual({ apiKey: "test-brevo-api-key", url: "https://brevo.test/v3/smtp/email" });
+    expect(config.ablyApiKey).toBe("testapp.testkey:test-secret");
   });
 
   it("si falta alguna variable obligatoria falla al importar y dice cuáles", async () => {
     // Un string vacío cuenta como faltante, y dotenv no pisa variables ya definidas.
     vi.stubEnv("JWTPRIVATEKEY", "");
     vi.stubEnv("BREVO_URL", "");
-    await expect(importConfig()).rejects.toThrow("Missing required environment variables: JWTPRIVATEKEY, BREVO_URL");
+    vi.stubEnv("ABLY_API_KEY", "");
+    await expect(importConfig()).rejects.toThrow(
+      "Missing required environment variables: JWTPRIVATEKEY, BREVO_URL, ABLY_API_KEY"
+    );
   });
 });
 

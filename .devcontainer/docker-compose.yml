@@ -3,6 +3,8 @@ services:
     image: mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm
     volumes:
       - ..:/workspaces/BE-Asado:cached
+      # Front (foodspot-nextjs) en solo lectura, para consultar cómo usa la API
+      - ../../foodspot-nextjs:/workspaces/foodspot-nextjs:ro
       # Persiste config, login e historial de chats de Claude Code entre rebuilds del container
       - claude-config:/home/node/.claude
       # Persiste el login de GitHub CLI (gh) entre rebuilds del container

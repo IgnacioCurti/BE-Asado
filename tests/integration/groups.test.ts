@@ -13,6 +13,8 @@ import {
   countOptions,
   countPurchaseReceipts,
   countReminders,
+  countMessages,
+  createMessage,
   createEvent,
   createOption,
   createPurchaseReceipt,
@@ -445,6 +447,8 @@ describe("PUT /api/groups/leaveGroup/:group con eventos del grupo (§4.4)", () =
     await createPurchaseReceipt({ event: event._id, shoppingDesignee: user._id, amount: 10, participants: [user._id] });
     await createReminder({ event: event._id, datetime: new Date("2030-01-01T00:00:00Z"), type: "eventStart" });
     const other = await createEvent({ organizer: user._id });
+    await createMessage({ event: event._id, author: user._id });
+    await createMessage({ event: other._id, author: user._id });
 
     const res = await leave(group, user);
 
@@ -455,6 +459,7 @@ describe("PUT /api/groups/leaveGroup/:group con eventos del grupo (§4.4)", () =
     expect(await countOptions()).toBe(0);
     expect(await countPurchaseReceipts()).toBe(0);
     expect(await countReminders()).toBe(0);
+    expect(await countMessages()).toBe(1);
   });
 
   it("si el borrado en cascada falla, no se borra nada (ni el grupo ni sus eventos)", async () => {

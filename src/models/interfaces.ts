@@ -103,6 +103,14 @@ export interface IReminder extends Document {
   type: string;
 }
 
+export interface IMessage extends Document {
+  _id: mongoose.Types.ObjectId;
+  event: mongoose.Types.ObjectId;
+  author: mongoose.Types.ObjectId;
+  text: string;
+  createdAt: Date;
+}
+
 export interface IRating extends Document {
   _id: mongoose.Types.ObjectId;
   score: number;

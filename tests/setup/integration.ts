@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, inject, vi } from "vitest";
 import mongoose from "mongoose";
 import { installMailerMock } from "../helpers/mailer.js";
+import { installRealtimeMock } from "../helpers/realtime.js";
 
 const mongoUri: string = inject("mongoUri");
 if (!mongoUri || !mongoUri.startsWith("mongodb://127.0.0.1")) {
@@ -28,6 +29,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   installMailerMock();
+  installRealtimeMock();
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   const collections = await mongoose.connection.db.collections();

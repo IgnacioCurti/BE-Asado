@@ -9,6 +9,8 @@ const testEnv = {
   BREVO_API_KEY: "test-brevo-api-key",
   BREVO_URL: "https://brevo.test/v3/smtp/email",
   ADMIN_MAIL: "admin@endava.com",
+  // Con formato válido (app.key:secret): firma tokens localmente, nunca llega a Ably.
+  ABLY_API_KEY: "testapp.testkey:test-secret",
   // DATABASE_URL lo define tests/setup/integration.ts apuntando a mongodb-memory-server.
   DATABASE_URL: "mongodb://127.0.0.1:1/never-used",
 };
