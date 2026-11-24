@@ -105,6 +105,10 @@ export async function findUserByEmail(email: string): Promise<UserFixture | null
   return doc ? plain<UserFixture>(doc) : null;
 }
 
+export async function deleteUser(id: Id): Promise<void> {
+  await User.deleteOne({ _id: id });
+}
+
 export async function countUsers(): Promise<number> {
   return User.countDocuments();
 }

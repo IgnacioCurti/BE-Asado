@@ -58,9 +58,9 @@ El evento no guarda `messages[]`. La relación vive en `Message.event`, por la m
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/api/events/:event/messages?before=<messageId>&limit=50` | Historial del más nuevo al más viejo, paginado por cursor. `limit` va de 1 a 100 y por defecto es 50. |
-| `POST` | `/api/events/:event/messages` | Body `{ text }`. Guarda el mensaje, lo publica en Ably y responde `201` con el mensaje. |
-| `GET` | `/api/events/:event/chat/token` | Devuelve un *TokenRequest* de Ably para escuchar el canal del evento (sección 6.2). |
+| `GET` | `/api/messages/getMessages/:event?before=<messageId>&limit=50` | Historial del más nuevo al más viejo, paginado por cursor. `limit` va de 1 a 100 y por defecto es 50. Responde `{ messages, hasMore }`. Para la página siguiente se pasa como `before` el `_id` del último mensaje recibido. |
+| `POST` | `/api/messages/sendMessage/:event` | Body `{ text }`. Guarda el mensaje, lo publica en Ably y responde `201` con el mensaje. |
+| `GET` | `/api/messages/getChatToken/:event` | Devuelve un *TokenRequest* de Ably para escuchar el canal del evento (sección 6.2). |
 
 El envío va siempre por REST. Así la validación, la autorización y los tests (supertest) quedan igual que en el resto de la API, y Ably solo **distribuye** mensajes que ya están guardados.
 
@@ -80,13 +80,13 @@ sequenceDiagram
     participant F as Front
     participant A as BE-Asado (Vercel)
     participant Ab as Ably
-    F->>A: GET /events/:event/messages (historial)
+    F->>A: GET /messages/getMessages/:event (historial)
     A-->>F: últimos 50 mensajes
-    F->>A: GET /events/:event/chat/token (JWT)
+    F->>A: GET /messages/getChatToken/:event (JWT)
     A->>A: eventViewer + firma un TokenRequest
     A-->>F: TokenRequest (solo "subscribe" a event:<id>)
     F->>Ab: conecta por WebSocket con el TokenRequest
-    F->>A: POST /events/:event/messages { text }
+    F->>A: POST /messages/sendMessage/:event { text }
     A->>A: valida, guarda en Mongo
     A->>Ab: publish("message", mensaje) por REST
     Ab-->>F: "message" a todos los suscriptos del canal
@@ -126,6 +126,6 @@ sequenceDiagram
 ## 7. Plan de implementación (tentativo)
 
 1. ✅ **Modelo `Message` y cascadas.** Schema, índice e interfaz. Borrado en `EventRepository.deleteCascade`, que cubre el borrado del evento y del grupo. Tests.
-2. **Endpoints REST.** `MessageRepository`, `MessageService`/`MessageController`, rutas con `eventViewer`/`eventParticipant`, regla de solo lectura por estado (`409`), paginación por cursor y mapeo del autor. Tests unitarios y de integración.
-3. **Ably.** `MessagePublisher` con la implementación de Ably y publicación tolerante a fallos en `POST /messages`. Endpoint `GET /events/:event/chat/token`. Config `ABLY_API_KEY`. Tests con publisher fake.
+2. ✅ **Endpoints REST.** `MessageRepository`, `MessageService`/`MessageController`, rutas con `eventViewer`/`eventParticipant`, regla de solo lectura por estado (`409`), paginación por cursor y mapeo del autor. Tests unitarios y de integración.
+3. **Ably.** `MessagePublisher` con la implementación de Ably y publicación tolerante a fallos en `sendMessage`. Endpoint `GET /messages/getChatToken/:event`. Config `ABLY_API_KEY`. Tests con publisher fake.
 4. **Notas para el front.** Contrato de la API y del canal en `FRONTEND_CHANGES.md`.

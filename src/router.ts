@@ -10,6 +10,7 @@ import ratingsRouter from "./routers/ratingsRouter.js";
 import cronRouter from "./routers/cronRouter.js";
 import optionRouter from "./routers/optionsRouter.js";
 import groupsRouter from "./routers/groupsRouter.js";
+import messagesRouter from "./routers/messagesRouter.js";
 
 const router: express.Router = express.Router();
 
@@ -42,6 +43,9 @@ router.use("/ratings", ratingsRouter);
 
 // groups routes
 router.use("/groups", groupsRouter);
+
+// messages (event chat) routes
+router.use("/messages", messagesRouter);
 
 //cron job route
 router.use("/cron", cronRouter);
