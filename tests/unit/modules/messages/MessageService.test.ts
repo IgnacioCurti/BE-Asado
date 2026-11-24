@@ -16,7 +16,11 @@ function setup({ event = { _id: id(), state: "available" } as any, page = [] as 
     findPage: vi.fn().mockResolvedValue(page),
     createWithAuthor: vi.fn(async (data: any) => ({ _id: id(), ...data })),
   };
-  return { service: new MessageService(events as any, messages as any), events, messages };
+  const realtime = {
+    publish: vi.fn().mockResolvedValue(undefined),
+    createTokenRequest: vi.fn(async (eventId: string, userId: string) => ({ eventId, userId })),
+  };
+  return { service: new MessageService(events as any, messages as any, realtime), events, messages, realtime };
 }
 
 describe("MessageService.list", () => {
@@ -124,5 +128,46 @@ describe("MessageService.send", () => {
   it("id de evento mal formado -> 400", async () => {
     const { service } = setup();
     await expect(service.send("abc", String(id()), "Hola")).rejects.toThrow(new BadRequestError("Invalid ObjectID"));
+  });
+});
+
+describe("MessageService.send: publicación en tiempo real", () => {
+  it("publica en el canal del evento el mensaje guardado", async () => {
+    const { service, realtime } = setup();
+    const eventId = String(id());
+
+    const result = await service.send(eventId, String(id()), "Hola");
+
+    expect(realtime.publish).toHaveBeenCalledWith(eventId, result);
+  });
+
+  it("si la publicación falla, lo loguea y devuelve el mensaje igual", async () => {
+    const { service, realtime } = setup();
+    realtime.publish.mockRejectedValue(new Error("Ably caído"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(service.send(String(id()), String(id()), "Hola")).resolves.toMatchObject({ text: "Hola" });
+    expect(log).toHaveBeenCalled();
+  });
+
+  it("no publica si el mensaje no se guarda", async () => {
+    const { service, realtime } = setup({ event: { _id: id(), state: "finished" } });
+    await expect(service.send(String(id()), String(id()), "Hola")).rejects.toThrow(ConflictError);
+    expect(realtime.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe("MessageService.createChatToken", () => {
+  it("pide el token para el evento y el usuario", async () => {
+    const { service, realtime } = setup();
+    const eventId = String(id());
+    const userId = String(id());
+    await expect(service.createChatToken(eventId, userId)).resolves.toEqual({ eventId, userId });
+    expect(realtime.createTokenRequest).toHaveBeenCalledWith(eventId, userId);
+  });
+
+  it("id de evento mal formado -> 400", async () => {
+    const { service } = setup();
+    expect(() => service.createChatToken("abc", String(id()))).toThrow(new BadRequestError("Invalid ObjectID"));
   });
 });

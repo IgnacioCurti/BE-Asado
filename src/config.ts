@@ -5,6 +5,7 @@ const REQUIRED_ENV_VARS: string[] = [
   "DATABASE_URL",
   "BREVO_API_KEY",
   "BREVO_URL",
+  "ABLY_API_KEY",
 ];
 
 // Fail at startup instead of on the first request that needs a missing value.
@@ -24,3 +25,6 @@ export const brevo: { apiKey: string; url: string } = {
 export const adminMail: string = process.env.ADMIN_MAIL;
 
 export const jwtPrivateKey: string = process.env.JWTPRIVATEKEY;
+
+// Realtime del chat (CHAT_FEATURE.md §6). Solo el backend conoce la key.
+export const ablyApiKey: string = process.env.ABLY_API_KEY;

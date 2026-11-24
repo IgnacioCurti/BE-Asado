@@ -4,6 +4,8 @@ import { IEvent, IMessage } from "../../models/interfaces.js";
 import { MESSAGE_LIMITS } from "../../models/message.js";
 import { EventRepository } from "../events/EventRepository.js";
 import { MessageRepository } from "./MessageRepository.js";
+import { ChatRealtime } from "./ChatRealtime.js";
+import type { TokenRequest } from "ably";
 
 // CHAT_FEATURE.md §1 y §4.
 export const READ_ONLY_STATES: string[] = ["finished", "cancelled"];
@@ -19,7 +21,8 @@ export interface MessagePage {
 export class MessageService {
   constructor(
     private readonly events: Pick<EventRepository, "findById">,
-    private readonly messages: Pick<MessageRepository, "findInEvent" | "findPage" | "createWithAuthor">
+    private readonly messages: Pick<MessageRepository, "findInEvent" | "findPage" | "createWithAuthor">,
+    private readonly realtime: ChatRealtime
   ) {}
 
   // Historial del más nuevo al más viejo. `before` es el _id del último mensaje
@@ -46,7 +49,22 @@ export class MessageService {
     if (READ_ONLY_STATES.includes(event.state))
       throw new ConflictError("The event is finished or cancelled. Its chat is read-only.");
     const content: string = this.parseText(text);
-    return this.messages.createWithAuthor({ event: eventId, author: authorId, text: content });
+    const message: IMessage = await this.messages.createWithAuthor({ event: eventId, author: authorId, text: content });
+    // El mensaje ya está guardado: si Ably falla, se loguea y se responde igual.
+    // Los clientes lo recuperan al volver a pedir el historial (§6.3 y §6.4).
+    try {
+      await this.realtime.publish(eventId, message);
+    } catch (error) {
+      console.error(`Could not publish chat message ${message._id} to the realtime channel:`, error);
+    }
+    return message;
+  }
+
+  // Token para escuchar el canal del evento. La regla de lectura (eventViewer)
+  // la aplica la ruta, y se vuelve a aplicar en cada renovación del token.
+  createChatToken(eventId: string, userId: string): Promise<TokenRequest> {
+    this.assertValidIds(eventId);
+    return this.realtime.createTokenRequest(eventId, userId);
   }
 
   private parseLimit(limit: unknown): number {

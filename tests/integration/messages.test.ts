@@ -10,6 +10,7 @@ import {
   newId,
   removeGroupMember,
 } from "../helpers/fixtures.js";
+import { failRealtimePublish, publishedMessages } from "../helpers/realtime.js";
 
 // CHAT_FEATURE.md: leen los miembros del grupo del evento, escriben los
 // participantes del evento, y finished/cancelled es de solo lectura.
@@ -110,6 +111,65 @@ describe("POST /api/messages/sendMessage/:event", () => {
     const user = await createUser();
     expect((await sendMessage(newId(), user.token, { text: "Hola" })).status).toBe(404);
     expect((await sendMessage("abc", user.token, { text: "Hola" })).status).toBe(400);
+  });
+});
+
+describe("POST /api/messages/sendMessage/:event: tiempo real", () => {
+  it("publica en el canal del evento el mismo mensaje que responde", async () => {
+    const { participant, event } = await scenario();
+    const res = await sendMessage(event._id, participant.token, { text: "Hola" });
+    expect(publishedMessages).toEqual([{ eventId: event._id, message: res.body }]);
+  });
+
+  it("si Ably falla, el mensaje se guarda y responde 201 igual", async () => {
+    const { participant, event } = await scenario();
+    failRealtimePublish("Ably caído");
+    const res = await sendMessage(event._id, participant.token, { text: "Hola" });
+    expect(res.status).toBe(201);
+    expect(await countMessages()).toBe(1);
+  });
+
+  it("si el mensaje se rechaza, no publica nada", async () => {
+    const { participant, event } = await scenario("finished");
+    await sendMessage(event._id, participant.token, { text: "Hola" });
+    expect(publishedMessages).toEqual([]);
+  });
+});
+
+describe("GET /api/messages/getChatToken/:event", () => {
+  const getToken = (eventId: string, token: string) =>
+    api().get(`/api/messages/getChatToken/${eventId}`).set(auth(token));
+
+  it("un miembro del grupo recibe un token que solo escucha el canal del evento", async () => {
+    const { groupMember, event } = await scenario();
+
+    const res = await getToken(event._id, groupMember.token);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ keyName: "testapp.testkey", clientId: groupMember._id, ttl: 15 * 60 * 1000 });
+    expect(JSON.parse(res.body.capability)).toEqual({ [`event:${event._id}`]: ["subscribe"] });
+  });
+
+  it("en un evento finished también (el historial se sigue leyendo)", async () => {
+    const { participant, event } = await scenario("finished");
+    expect((await getToken(event._id, participant.token)).status).toBe(200);
+  });
+
+  it("alguien de afuera del grupo -> 403", async () => {
+    const { outsider, event } = await scenario();
+    expect((await getToken(event._id, outsider.token)).status).toBe(403);
+  });
+
+  it("quien salió del grupo y no participa del evento pierde el acceso al renovar -> 403", async () => {
+    const { groupMember, event } = await scenario();
+    await removeGroupMember(event.group, groupMember._id);
+    expect((await getToken(event._id, groupMember.token)).status).toBe(403);
+  });
+
+  it("sin token -> 401; evento inexistente -> 404", async () => {
+    const { participant, event } = await scenario();
+    expect((await api().get(`/api/messages/getChatToken/${event._id}`)).status).toBe(401);
+    expect((await getToken(newId(), participant.token)).status).toBe(404);
   });
 });
 

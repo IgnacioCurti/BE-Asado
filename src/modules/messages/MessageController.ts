@@ -16,4 +16,9 @@ export class MessageController {
     const message = await this.service.send(req.params.event, req.user._id, req.body?.text);
     return res.status(STATUS_CODES.CREATED).json(message);
   };
+
+  chatToken = async (req: IRequestWithUser, res: Response): Promise<Response> => {
+    const tokenRequest = await this.service.createChatToken(req.params.event, req.user._id);
+    return res.status(STATUS_CODES.OK).json(tokenRequest);
+  };
 }

@@ -110,7 +110,8 @@ sequenceDiagram
 - Después de guardar, `MessageService` publica con `Ably.Rest` (HTTP), con `await` antes de responder, porque Vercel congela la función después de la respuesta.
 - Si Ably falla, se loguea y el `POST` responde `201` igual, porque el mensaje ya está guardado.
 - El emisor también recibe el mensaje por el canal, así que el front deduplica por `_id`.
-- El publicador va detrás de una interfaz (`MessagePublisher`). Los tests usan un fake, y cambiar de proveedor solo toca esa implementación y el endpoint del token.
+- La publicación y los tokens van detrás de la interfaz `ChatRealtime` (`src/modules/messages/ChatRealtime.ts`). Los tests usan un doble, y cambiar de proveedor solo toca su implementación (`AblyChatRealtime`).
+- El cliente REST de Ably usa un timeout de 3 s y un solo reintento, para no colgar el request.
 
 ### 6.4 Consistencia
 
@@ -127,5 +128,5 @@ sequenceDiagram
 
 1. ✅ **Modelo `Message` y cascadas.** Schema, índice e interfaz. Borrado en `EventRepository.deleteCascade`, que cubre el borrado del evento y del grupo. Tests.
 2. ✅ **Endpoints REST.** `MessageRepository`, `MessageService`/`MessageController`, rutas con `eventViewer`/`eventParticipant`, regla de solo lectura por estado (`409`), paginación por cursor y mapeo del autor. Tests unitarios y de integración.
-3. **Ably.** `MessagePublisher` con la implementación de Ably y publicación tolerante a fallos en `sendMessage`. Endpoint `GET /messages/getChatToken/:event`. Config `ABLY_API_KEY`. Tests con publisher fake.
+3. ✅ **Ably.** `ChatRealtime`/`AblyChatRealtime`, publicación tolerante a fallos en `sendMessage` y endpoint `GET /messages/getChatToken/:event`. `ABLY_API_KEY` es obligatoria al arrancar, como las demás variables de `config.ts`. Tests con un doble de la publicación.
 4. **Notas para el front.** Contrato de la API y del canal en `FRONTEND_CHANGES.md`.
