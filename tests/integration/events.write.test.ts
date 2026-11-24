@@ -7,6 +7,8 @@ import {
   countPurchaseReceipts,
   countRatings,
   countReminders,
+  countMessages,
+  createMessage,
   countTransferReceipts,
   addGroupMembers,
   createEvent,
@@ -1143,7 +1145,7 @@ describe("organizador que salió del grupo (GROUPS_FEATURE §4.4.1)", () => {
 });
 
 describe("DELETE /api/events/deleteEvent/:id", () => {
-  it("el organizador borra el evento y en cascada comprobantes, imágenes, ratings y recordatorios", async () => {
+  it("el organizador borra el evento y en cascada comprobantes, imágenes, ratings, recordatorios y mensajes", async () => {
     const organizer = await createUser();
     const member = await createUser();
     const event = await createEvent({ organizer: organizer._id, members: [organizer._id, member._id] });
@@ -1157,6 +1159,8 @@ describe("DELETE /api/events/deleteEvent/:id", () => {
     await createRating({ event: event._id, user: member._id, score: 3 });
     await createReminder({ event: event._id, type: "eventStart", datetime: new Date() });
     await createReminder({ event: otherEvent._id, type: "eventStart", datetime: new Date() });
+    await createMessage({ event: event._id, author: member._id });
+    await createMessage({ event: otherEvent._id, author: organizer._id });
     await createPurchaseReceipt({ event: otherEvent._id, shoppingDesignee: organizer._id, amount: 5, participants: [organizer._id], image: keptImage });
 
     const res = await api().delete(`/api/events/deleteEvent/${event._id}`).set(auth(organizer.token));
@@ -1169,6 +1173,7 @@ describe("DELETE /api/events/deleteEvent/:id", () => {
     expect(await countImages()).toBe(1);
     expect(await countRatings()).toBe(0);
     expect(await countReminders()).toBe(1);
+    expect(await countMessages()).toBe(1);
   });
 
   it("borra también las opciones de votación del evento (y no las de otros)", async () => {
