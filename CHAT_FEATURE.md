@@ -1,6 +1,6 @@
 # Feature: Chat por evento
 
-> Estado: **diseño cerrado (2026-11-24)**. Realtime con Ably (sección 6).
+> Estado: **implementado (2026-11-24)**, rama `t/chat`. Realtime con Ably (sección 6).
 > ✅ = decidido. ⏸️ = en espera, se retoma más adelante.
 
 ## 1. Propuesta
@@ -129,4 +129,4 @@ sequenceDiagram
 1. ✅ **Modelo `Message` y cascadas.** Schema, índice e interfaz. Borrado en `EventRepository.deleteCascade`, que cubre el borrado del evento y del grupo. Tests.
 2. ✅ **Endpoints REST.** `MessageRepository`, `MessageService`/`MessageController`, rutas con `eventViewer`/`eventParticipant`, regla de solo lectura por estado (`409`), paginación por cursor y mapeo del autor. Tests unitarios y de integración.
 3. ✅ **Ably.** `ChatRealtime`/`AblyChatRealtime`, publicación tolerante a fallos en `sendMessage` y endpoint `GET /messages/getChatToken/:event`. `ABLY_API_KEY` es obligatoria al arrancar, como las demás variables de `config.ts`. Tests con un doble de la publicación.
-4. **Notas para el front.** Contrato de la API y del canal en `FRONTEND_CHANGES.md`.
+4. ✅ **Notas para el front.** Contrato de la API y del canal en `FRONTEND_CHANGES.md`.

@@ -842,3 +842,93 @@ No admin / no miembro / grupo inexistente: **403** / **403** / **404**, como el 
 - Mostrar el **403** de mail distinto con un mensaje claro ("esta invitación es para otro mail").
 - La ruta `/join/<CODE>` sigue sirviendo para compartir el código a mano, pero los mails ya no la usan.
 - Pantalla de admin: listar con `getInvitations` y permitir revocar.
+
+---
+
+## Chat por evento
+
+### 35. Chat en tiempo real por evento
+
+**Estado:** implementado (rama `t/chat`) · **Requiere cambios en el front:** sí (feature nueva, no rompe nada existente) · **Origen:** CHAT_FEATURE.md
+
+Cada evento tiene un chat. Un mensaje tiene texto, autor y hora. No hay reacciones, edición ni borrado. Los mensajes **se envían y se leen por la API** y llegan en tiempo real por **Ably**, un servicio de WebSockets gestionado: Vercel no puede mantener WebSockets abiertos.
+
+| Quién | Puede |
+|--|--|
+| Miembro del grupo del evento | Leer el historial y escuchar en tiempo real |
+| Participante del evento (`event.members`) | Además, escribir |
+| Evento `finished` o `cancelled` | Nadie escribe (solo lectura); el historial se sigue leyendo |
+
+#### Endpoints nuevos (todos requieren token de sesión)
+
+**`GET /api/messages/getMessages/:event?limit=50&before=<messageId>`**: historial, **del más nuevo al más viejo**.
+- `limit`: de 1 a 100 (por defecto 50).
+- `before`: `_id` del último mensaje de la página anterior, para cargar mensajes más viejos.
+- Responde **200** `{ messages: Message[], hasMore: boolean }`.
+
+**`POST /api/messages/sendMessage/:event`**: body `{ text }`. Responde **201** con el `Message` creado. Autor y hora los pone el backend.
+
+**`GET /api/messages/getChatToken/:event`**: responde **200** con un *TokenRequest* de Ably para escuchar el canal del evento. Se pasa tal cual al SDK de Ably (ver abajo).
+
+```ts
+interface Message {
+  _id: string;
+  event: string;
+  text: string;          // recortado, 1 a 1000 caracteres
+  createdAt: string;     // ISO, hora del servidor
+  author: { _id: string; name: string; lastName: string; profilePicture: string | null } | null; // null = "Usuario eliminado"
+  __v: number;
+}
+```
+
+| Caso | Respuesta |
+|--|--|
+| No es miembro del grupo (leer o pedir token) | **403** |
+| No es participante del evento (escribir) | **403** |
+| Evento `finished` o `cancelled` (escribir) | **409** `"The event is finished or cancelled. Its chat is read-only."` |
+| Texto vacío, solo espacios o no string | **400** `"The message text is required."` |
+| Texto de más de 1000 caracteres | **400** `"The message text must be at most 1000 characters."` |
+| `limit` fuera de 1–100 | **400** `"The limit must be an integer between 1 and 100."` |
+| `before` de otro evento | **400** `"The cursor message does not belong to the event."` |
+| Id mal formado / evento inexistente | **400** / **404** |
+
+#### Tiempo real (Ably)
+
+- **Canal:** `event:<eventId>`. **Nombre del evento Ably:** `message`. **Payload:** el mismo `Message` que devuelve la API.
+- El token solo permite **escuchar** ese canal: el front **no publica** en Ably, siempre envía por `sendMessage`.
+- El token dura 15 minutos y el SDK lo renueva solo, volviendo a pedirlo. Si el usuario salió del grupo, la renovación devuelve 403 y deja de recibir mensajes.
+- **El emisor también recibe su propio mensaje** por el canal, además de la respuesta del `POST`: hay que **deduplicar por `_id`**.
+- Si Ably falla al publicar, el mensaje igual se guarda y `sendMessage` responde 201. Los demás lo ven cuando vuelvan a pedir el historial.
+
+#### Cómo adaptar el front (probable)
+
+- **Dependencia:** `ably` (v2). El SDK de tiempo real tiene que correr en el navegador (componente `'use client'`). Ninguna key de Ably va en el front.
+- **Token desde el navegador:** hoy la API se llama desde el servidor con el token de la cookie (`getServer`). El `authCallback` de Ably corre en el navegador, así que conviene exponer el token con una **Server Action** que llame a `getServer('/messages/getChatToken/<id>')` y devuelva el TokenRequest:
+
+  ```ts
+  // client component
+  const client = new Ably.Realtime({
+    authCallback: async (_params, cb) => {
+      try { cb(null, await getChatTokenAction(eventId)); } // Server Action
+      catch (error) { cb(error as Ably.ErrorInfo, null); }
+    },
+  });
+  const channel = client.channels.get(`event:${eventId}`);
+  channel.subscribe('message', (msg) => addMessage(msg.data as Message)); // dedup por _id
+  // al desmontar la pantalla del chat:
+  return () => client.close();
+  ```
+
+- **Abrir el chat:**
+  1. pedir la primera página con `getMessages`;
+  2. conectar a Ably y suscribirse;
+  3. mostrar los mensajes en orden inverso al que llegan (la API devuelve primero el más nuevo).
+- **Scroll hacia arriba:** mientras `hasMore` sea `true`, pedir más pasando `before` = `_id` del mensaje más viejo cargado.
+- **Reconexión:** cuando el SDK vuelve a `connected` después de un corte, pedir de nuevo la primera página y unirla con lo que ya hay, deduplicando por `_id`. Si el corte duró menos de ~2 minutos, Ably entrega igual lo perdido.
+- **Enviar:** usar `sendMessage` (Server Action con `postServer`) y agregar el mensaje de la respuesta (deduplicando contra el que llega por Ably).
+- **Permisos en la UI:**
+  - Ocultar el input si el usuario no es participante del evento (`isMember`) o si el evento está `finished` o `cancelled`.
+  - Igual manejar el **409** por si el estado cambió con el chat abierto.
+  - Mostrar "Usuario eliminado" cuando `author` sea `null`.
+  - Limitar el input a 1000 caracteres.
+- **Conexiones:** el free tier de Ably admite unas 200 conexiones simultáneas. **Cerrar el cliente** (`client.close()`) al salir de la pantalla del chat, y no dejarlo abierto en toda la app.
